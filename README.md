@@ -15,11 +15,15 @@ follow-up - see [`SYNC.md`](SYNC.md).
 
 | Page | What it does |
 |---|---|
-| `/` (Monthly) | Month stepper + person/category/scenario filters; money-in and money-out lists with a net at the bottom, plus a smoothed monthly-average net. Quick-add transaction. |
-| `/recurring.html` | Manage recurring items (accordion cards). Footer shows the known monthly baseline. |
-| `/transactions.html` | Manage ad-hoc transactions, filter by month/person/category. |
-| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments. "Open in Monthly view" applies one. |
+| `/` (Overview) | Month stepper + person/category/scenario filters; money-in and money-out lists with a net at the bottom, plus a smoothed monthly-average net. Read-only rollup + a unified "+ Add". |
+| `/budget.html` | The one place to add and manage every money event. Segmented view (All / Recurring / One-time) over person/category/status/month filters; accordion cards for edit. Footer shows the known monthly baseline. |
+| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments. "Open in Overview" applies one. |
 | `/settings.html` | Manage the People and Category reference lists. |
+
+**Adding an entry**: one "+ Add" form (on Overview and Budget) with a
+**Repeats** toggle - off saves a dated one-time `Transaction`, on reveals
+the schedule fields and saves a `RecurringItem`. The two are still
+separate tables/endpoints; only the entry point is merged.
 
 ## API
 
@@ -33,7 +37,7 @@ Plain JSON REST under `/api` (`/docs` for Swagger):
 - `/api/scenarios` - CRUD; `POST /api/scenarios/{id}/adjustments`;
   `PATCH`/`DELETE /api/adjustments/{id}`
 - `GET /api/monthly?month=YYYY-MM&person_id=&joint=&category_ids=&scenario_id=`
-  - the aggregation the Monthly page renders (see
+  - the aggregation the Overview page renders (see
   `app/services/monthly.py`)
 
 Money crosses the API as integer **cents** (`amount_cents`) in both

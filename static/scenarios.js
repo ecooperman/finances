@@ -1,6 +1,6 @@
 // Scenarios - saved "what-if" bundles. Each scenario holds a list of
 // adjustments (add a hypothetical line / remove an existing recurring item
-// / scale or override one). The Monthly page overlays a scenario and shows
+// / scale or override one). The Overview page overlays a scenario and shows
 // its net next to the real net. Adjustments are add + delete here; editing
 // one = delete and re-add.
 
@@ -13,7 +13,7 @@ let PEOPLE = [];
 let CATEGORIES = [];
 let RECURRING = [];
 
-const MONTH_OPTIONS = MONTH_NAMES.map((n, i) => ({ value: i + 1, label: n }));
+// MONTH_OPTIONS comes from common.js (loaded first).
 const recurringName = (id) => {
   const r = RECURRING.find((x) => x.id === id);
   return r ? r.name : `item #${id}`;
@@ -239,7 +239,7 @@ function card(scenario) {
   const summary = el_("button", { class: "item-summary", type: "button", "aria-expanded": "false" }, [
     el_("span", { class: "item-summary-title", text: scenario.name }),
     el_("span", { class: "item-badge item-badge-muted", text: `${n} change${n === 1 ? "" : "s"}` }),
-    el_("a", { class: "item-summary-icon-link", href: `/?scenario=${scenario.id}`, title: "Open in Monthly view", "data-icon": "calendar", "aria-hidden": "true" }),
+    el_("a", { class: "item-summary-icon-link", href: `/?scenario=${scenario.id}`, title: "Open in Overview", "data-icon": "calendar", "aria-hidden": "true" }),
     el_("span", { class: "item-chevron", "aria-hidden": "true", text: "▸" }),
   ]);
 

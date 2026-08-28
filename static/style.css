@@ -50,6 +50,35 @@
   padding: 0;
 }
 
+/* --- segmented control (Budget: All / Recurring / One-time) --- */
+
+.fin-segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+
+.fin-segmented button {
+  background: #fff;
+  color: var(--muted);
+  border: none;
+  border-radius: 0;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fin-segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.fin-segmented button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* --- filter row --- */
 
 .fin-filters {
@@ -84,7 +113,12 @@
   padding: 8px 12px;
 }
 
-/* --- section + rows (Monthly view) --- */
+.fin-filters .secondary-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* --- section + rows (Overview) --- */
 
 .fin-section {
   margin-bottom: 22px;
@@ -290,9 +324,12 @@
 
 /* theme.css's `.field { display: flex }` is defined after its global
    `.hidden { display: none }` and at equal specificity, so a plain
-   `.field.hidden` would still show. Re-assert the hide here (this sheet
-   loads last). Used for the conditionally-shown anchor-month field. */
-.field.hidden {
+   `.field.hidden` (or `.field-row` / this app's `.fin-filter`, all of
+   which set `display`) would still show. Re-assert the hide here (this
+   sheet loads last). Used for conditionally-shown form fields and filters. */
+.field.hidden,
+.field-row.hidden,
+.fin-filter.hidden {
   display: none;
 }
 

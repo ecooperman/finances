@@ -1,8 +1,9 @@
-// Monthly view - the dashboard. Combines the recurring items that land in
-// the selected month with any ad-hoc transactions dated that month, split
+// Overview - the month dashboard. Combines the recurring items that land in
+// the selected month with any one-time transactions dated that month, split
 // into money-in / money-out, with a net at the bottom. An optional saved
 // scenario is overlaid server-side (see /api/monthly) and its net is shown
-// next to the real one.
+// next to the real one. The "+ Add" here is the same unified form as the
+// Budget page (common.js) - a Repeats toggle picks transaction vs recurring.
 
 const state = {
   month: thisMonth(),
@@ -141,12 +142,17 @@ async function render() {
 
 // --- filters -------------------------------------------------------------
 
+let PEOPLE = [];
+let CATEGORIES = [];
+
 async function initFilters() {
   const [people, categories, scenarios] = await Promise.all([
     loadPeople(),
     loadCategories(),
     loadScenarios(),
   ]);
+  PEOPLE = people;
+  CATEGORIES = categories;
 
   fillPersonFilter(personSelect, people);
   personSelect.value = state.personVal;
@@ -176,18 +182,6 @@ async function initFilters() {
     state.scenarioId = scenarioSelect.value;
     render();
   });
-
-  // Quick-add transaction pickers
-  fillSelect(
-    document.getElementById("txn-category"),
-    categories.map((c) => ({ value: c.id, label: c.name })),
-    { blankLabel: "— none —" }
-  );
-  fillSelect(
-    document.getElementById("txn-person"),
-    people.map((p) => ({ value: p.id, label: p.name })),
-    { blankLabel: "Joint" }
-  );
 }
 
 // --- month stepper -----------------------------------------------------
@@ -205,51 +199,48 @@ document.getElementById("month-today").addEventListener("click", () => {
   render();
 });
 
-// --- quick add transaction -------------------------------------------
+// --- unified quick-add (transaction or recurring item) ----------------
 
-const addForm = document.getElementById("add-txn-form");
-const showAdd = document.getElementById("show-add-txn");
-showAdd.addEventListener("click", () => {
+const addForm = document.getElementById("add-entry-form");
+
+function buildAddForm() {
+  addForm.innerHTML =
+    entryAddFieldsHTML() +
+    `<div class="item-actions">
+       <button type="submit" class="save-btn">Add</button>
+       <button type="button" id="cancel-add" class="cancel-btn">Cancel</button>
+     </div>`;
+  wireEntryForm(addForm, PEOPLE, CATEGORIES);
+  addForm.querySelector("#cancel-add").addEventListener("click", () => {
+    addForm.classList.add("hidden");
+    buildAddForm();
+  });
+}
+
+document.getElementById("show-add").addEventListener("click", () => {
   addForm.classList.toggle("hidden");
-  if (!addForm.classList.contains("hidden")) {
-    document.getElementById("txn-date").value = new Date().toISOString().slice(0, 10);
-    document.getElementById("txn-description").focus();
-  }
+  if (!addForm.classList.contains("hidden")) addForm.querySelector('[name="name"]').focus();
 });
-document.getElementById("cancel-add-txn").addEventListener("click", () => {
-  addForm.classList.add("hidden");
-  addForm.reset();
-});
+
 addForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const amount_cents = dollarsToCents(document.getElementById("txn-amount").value);
-  if (amount_cents == null || amount_cents <= 0) {
-    Global.showMessage("Enter a dollar amount greater than zero.", "error");
-    return;
-  }
-  const body = {
-    date: document.getElementById("txn-date").value,
-    description: document.getElementById("txn-description").value.trim(),
-    amount_cents,
-    direction: document.getElementById("txn-direction").value,
-    category_id: document.getElementById("txn-category").value || null,
-    person_id: document.getElementById("txn-person").value || null,
-  };
+  const entry = readEntryForm(addForm);
+  const err = entryValidationError(entry);
+  if (err) return Global.showMessage(err, "error");
   try {
-    await fetchJSON(`${API}/transactions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    addForm.reset();
+    await submitEntry(entry);
     addForm.classList.add("hidden");
-    Global.showMessage("Transaction added.", "success");
+    buildAddForm();
+    Global.showMessage(entry.type === "recurring" ? "Recurring item added." : "Transaction added.", "success");
     render();
-  } catch (err) {
-    Global.showMessage(err.message, "error");
+  } catch (err2) {
+    Global.showMessage(err2.message, "error");
   }
 });
 
 // --- go ----------------------------------------------------------------
 
-initFilters().then(render);
+initFilters().then(() => {
+  buildAddForm();
+  render();
+});

@@ -56,8 +56,7 @@ def _render(name: str):
 
 
 app.get("/", response_class=HTMLResponse)(_render("index.html"))
-app.get("/recurring.html", response_class=HTMLResponse)(_render("recurring.html"))
-app.get("/transactions.html", response_class=HTMLResponse)(_render("transactions.html"))
+app.get("/budget.html", response_class=HTMLResponse)(_render("budget.html"))
 app.get("/scenarios.html", response_class=HTMLResponse)(_render("scenarios.html"))
 app.get("/settings.html", response_class=HTMLResponse)(_render("settings.html"))
 

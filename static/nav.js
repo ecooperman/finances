@@ -4,18 +4,16 @@
 
 function currentNavActive() {
   const path = window.location.pathname;
-  if (path === "/recurring.html") return "recurring";
-  if (path === "/transactions.html") return "transactions";
+  if (path === "/budget.html") return "budget";
   if (path === "/scenarios.html") return "scenarios";
   if (path === "/settings.html") return "settings";
-  return "monthly";
+  return "overview";
 }
 
 const active = currentNavActive();
 Global.buildNav([
-  { href: "/", icon: "calendar", label: "Monthly", active: active === "monthly" },
-  { href: "/recurring.html", icon: "repeat", label: "Recurring", active: active === "recurring" },
-  { href: "/transactions.html", icon: "wallet", label: "Transactions", active: active === "transactions" },
+  { href: "/", icon: "calendar", label: "Overview", active: active === "overview" },
+  { href: "/budget.html", icon: "wallet", label: "Budget", active: active === "budget" },
   { href: "/scenarios.html", icon: "sliders", label: "Scenarios", active: active === "scenarios" },
   { href: "/settings.html", icon: "settings", label: "Settings", active: active === "settings" },
   { icon: "refresh", label: "Refresh", onclick: () => location.reload() },

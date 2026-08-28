@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Monthly · Finances</title>
+  <title>Overview · Finances</title>
   <link rel="stylesheet" href="{{ shared_assets_base }}/theme.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="app-header">
-    <h1>Monthly</h1>
+    <h1>Overview</h1>
     <p class="subtitle">Money in minus money out, for one month.</p>
   </header>
 
@@ -42,44 +42,8 @@
       </label>
     </div>
 
-    <button id="show-add-txn" type="button" class="add-toggle">+ Add transaction</button>
-    <form id="add-txn-form" class="add-card hidden">
-      <div class="field-row">
-        <div class="field">
-          <label for="txn-date">Date <span class="required">*</span></label>
-          <input id="txn-date" name="date" type="date" required />
-        </div>
-        <div class="field">
-          <label for="txn-amount">Amount ($) <span class="required">*</span></label>
-          <input id="txn-amount" name="amount" type="text" inputmode="decimal" required placeholder="1200.00" />
-        </div>
-      </div>
-      <div class="field">
-        <label for="txn-description">Description <span class="required">*</span></label>
-        <input id="txn-description" name="description" type="text" required placeholder="e.g. New water heater" />
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label for="txn-direction">Direction</label>
-          <select id="txn-direction" name="direction">
-            <option value="out">Money out</option>
-            <option value="in">Money in</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="txn-category">Category</label>
-          <select id="txn-category" name="category_id"></select>
-        </div>
-        <div class="field">
-          <label for="txn-person">Person</label>
-          <select id="txn-person" name="person_id"></select>
-        </div>
-      </div>
-      <div class="item-actions">
-        <button type="submit" class="save-btn">Add transaction</button>
-        <button type="button" id="cancel-add-txn" class="cancel-btn">Cancel</button>
-      </div>
-    </form>
+    <button id="show-add" type="button" class="add-toggle">+ Add</button>
+    <form id="add-entry-form" class="add-card hidden"></form>
 
     <section class="fin-section">
       <div class="list-header">

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Budget · Finances</title>
+  <link rel="stylesheet" href="{{ shared_assets_base }}/theme.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Budget</h1>
+    <p class="subtitle">Everything that moves money - recurring bills &amp; income, plus one-off transactions.</p>
+  </header>
+
+  <div id="app-nav-mount"></div>
+
+  <main>
+    <div id="page-message" class="page-message hidden"></div>
+
+    <div class="fin-segmented" id="view-seg" role="tablist">
+      <button type="button" data-view="all" class="active">All</button>
+      <button type="button" data-view="recurring">Recurring</button>
+      <button type="button" data-view="onetime">One-time</button>
+    </div>
+
+    <div class="fin-filters">
+      <label class="fin-filter">
+        <span>Person</span>
+        <select id="filter-person"></select>
+      </label>
+      <label class="fin-filter">
+        <span>Categories</span>
+        <span id="filter-category"></span>
+      </label>
+      <label class="fin-filter" id="status-filter">
+        <span>Status</span>
+        <select id="filter-active">
+          <option value="active">Active only</option>
+          <option value="all">All</option>
+          <option value="inactive">Paused only</option>
+        </select>
+      </label>
+      <label class="fin-filter" id="month-filter">
+        <span>Month</span>
+        <input id="filter-month" type="month" />
+      </label>
+      <button type="button" id="filter-alltime" class="secondary-btn">All time</button>
+    </div>
+
+    <button id="show-add" type="button" class="add-toggle">+ Add</button>
+    <form id="add-form" class="add-card hidden"></form>
+
+    <section class="fin-section" id="sec-recurring">
+      <div class="list-header">
+        <h2>Recurring</h2>
+        <span id="recurring-count" class="list-count"></span>
+      </div>
+      <div id="recurring-list" class="item-list"></div>
+      <p id="recurring-empty" class="empty-state hidden">No recurring items match.</p>
+    </section>
+
+    <section class="fin-section" id="sec-onetime">
+      <div class="list-header">
+        <h2>One-time</h2>
+        <span id="onetime-sub" class="list-count"></span>
+      </div>
+      <div id="onetime-list" class="item-list"></div>
+      <p id="onetime-empty" class="empty-state hidden">No one-time transactions match.</p>
+    </section>
+
+    <div id="baseline" class="fin-totals"></div>
+
+    <div id="app-version"></div>
+  </main>
+
+  <script src="{{ shared_assets_base }}/theme.js"></script>
+  <script src="{{ shared_assets_base }}/icons.js"></script>
+  <script src="version.js"></script>
+  <script src="common.js"></script>
+  <script src="nav.js"></script>
+  <script src="budget.js"></script>
+</body>
+</html>
