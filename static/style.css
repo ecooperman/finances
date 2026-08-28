@@ -1,0 +1,411 @@
+/* Finance-specific styling only. Base reset, tokens, forms, accordion
+   cards, add-toggle, toasts, .app-nav and buttons all come from
+   https://static.evancooperman.com/theme.css - see shared-assets/README.md
+   before adding a rule that duplicates one there. */
+
+:root {
+  --in: var(--success);
+  --in-bg: var(--success-bg);
+  --out: #b5651d;
+  --out-bg: #fbeee2;
+}
+
+/* --- month stepper --- */
+
+.fin-monthbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 14px;
+}
+
+.fin-step {
+  background: var(--muted-bg);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 1;
+  padding: 6px 16px;
+  border-radius: 8px;
+}
+
+.fin-monthbar-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-weight: 700;
+  font-size: 17px;
+}
+
+.fin-today-link {
+  background: none;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0;
+}
+
+/* --- filter row --- */
+
+.fin-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 18px;
+}
+
+.fin-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fin-filter > span {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.fin-filter select,
+.fin-filter input[type="month"] {
+  width: auto;
+  min-width: 150px;
+}
+
+.fin-filters .secondary-btn {
+  padding: 8px 12px;
+}
+
+/* --- section + rows (Monthly view) --- */
+
+.fin-section {
+  margin-bottom: 22px;
+}
+
+.fin-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.fin-item-left {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fin-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fin-item-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.fin-item-icon {
+  display: inline-flex;
+  color: var(--muted);
+}
+.fin-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.fin-item-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fin-item-amount {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 15px;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.fin-amount-in {
+  color: var(--in);
+}
+.fin-amount-out {
+  color: var(--out);
+}
+
+.fin-amount-was {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+/* scenario effect tints */
+.fin-item-added {
+  border-color: var(--in);
+  background: var(--in-bg);
+}
+.fin-item-removed {
+  opacity: 0.6;
+}
+.fin-item-removed .fin-item-amount {
+  text-decoration: line-through;
+}
+.fin-item-modified {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+}
+
+/* --- small pills --- */
+
+.fin-chip,
+.fin-badge,
+.fin-cadence,
+.fin-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.fin-chip-none {
+  background: var(--muted-bg);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.fin-badge-joint {
+  background: var(--muted-bg);
+  color: var(--muted);
+}
+
+.fin-cadence {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+
+.fin-tag-added {
+  background: var(--in-bg);
+  color: var(--in);
+}
+.fin-tag-removed {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.fin-tag-modified {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+/* --- totals --- */
+
+.fin-totals {
+  margin-top: 8px;
+}
+
+.fin-total-group {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.fin-total-muted {
+  opacity: 0.85;
+}
+
+.fin-total-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.fin-total-row {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+  padding: 3px 0;
+}
+
+.fin-total-row.fin-total-net {
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding-top: 8px;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.fin-net-pos {
+  color: var(--in);
+}
+.fin-net-neg {
+  color: var(--danger);
+}
+
+.fin-normalized,
+.fin-delta {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 6px 2px 16px;
+}
+
+/* --- accordion card meta + edit forms --- */
+
+.fin-card-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.fin-edit-form .field-row {
+  flex-wrap: wrap;
+}
+
+/* theme.css's `.field { display: flex }` is defined after its global
+   `.hidden { display: none }` and at equal specificity, so a plain
+   `.field.hidden` would still show. Re-assert the hide here (this sheet
+   loads last). Used for the conditionally-shown anchor-month field. */
+.field.hidden {
+  display: none;
+}
+
+/* --- scenarios --- */
+
+.fin-adj-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.fin-adj-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.fin-adj-text {
+  font-size: 13px;
+}
+
+.fin-adj-row .danger-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.fin-adj-form {
+  margin-top: 10px;
+}
+
+/* --- settings --- */
+
+.fin-settings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.fin-settings-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
+}
+
+.fin-settings-row input[type="text"] {
+  flex: 1;
+  min-width: 120px;
+  width: auto;
+}
+
+.fin-settings-row input[type="color"] {
+  width: 40px;
+  height: 34px;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.fin-settings-row select {
+  width: auto;
+}
+
+.fin-settings-row .secondary-btn,
+.fin-settings-row .danger-btn {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.fin-move-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.fin-move {
+  background: none;
+  color: var(--muted);
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.fin-inline-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.fin-inline-add input[type="text"] {
+  flex: 1;
+  min-width: 140px;
+  width: auto;
+}
+
+.fin-inline-add input[type="color"] {
+  width: 44px;
+  height: 38px;
+  padding: 2px;
+}
+
+.fin-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 8px 2px 0;
+}

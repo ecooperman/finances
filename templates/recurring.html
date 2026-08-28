@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recurring · Finances</title>
+  <link rel="stylesheet" href="{{ shared_assets_base }}/theme.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Recurring</h1>
+    <p class="subtitle">The knowns - salaries, mortgage, HOA, insurance, subscriptions.</p>
+  </header>
+
+  <div id="app-nav-mount"></div>
+
+  <main>
+    <div id="page-message" class="page-message hidden"></div>
+
+    <div class="fin-filters">
+      <label class="fin-filter">
+        <span>Person</span>
+        <select id="filter-person"></select>
+      </label>
+      <label class="fin-filter">
+        <span>Categories</span>
+        <span id="filter-category"></span>
+      </label>
+      <label class="fin-filter">
+        <span>Status</span>
+        <select id="filter-active">
+          <option value="active">Active only</option>
+          <option value="all">All</option>
+          <option value="inactive">Paused only</option>
+        </select>
+      </label>
+    </div>
+
+    <button id="show-add" type="button" class="add-toggle">+ Add recurring item</button>
+    <form id="add-form" class="add-card hidden"></form>
+
+    <section class="fin-section">
+      <div class="list-header">
+        <h2>Recurring items</h2>
+        <span id="count" class="list-count"></span>
+      </div>
+      <div id="list" class="item-list"></div>
+      <p id="empty" class="empty-state hidden">No recurring items yet - add one above.</p>
+    </section>
+
+    <div id="baseline" class="fin-totals"></div>
+
+    <div id="app-version"></div>
+  </main>
+
+  <script src="{{ shared_assets_base }}/theme.js"></script>
+  <script src="{{ shared_assets_base }}/icons.js"></script>
+  <script src="version.js"></script>
+  <script src="common.js"></script>
+  <script src="nav.js"></script>
+  <script src="recurring.js"></script>
+</body>
+</html>

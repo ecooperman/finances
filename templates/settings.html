@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings · Finances</title>
+  <link rel="stylesheet" href="{{ shared_assets_base }}/theme.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Settings</h1>
+    <p class="subtitle">People and categories used everywhere else in the app.</p>
+  </header>
+
+  <div id="app-nav-mount"></div>
+
+  <main>
+    <div id="page-message" class="page-message hidden"></div>
+
+    <section class="fin-section">
+      <div class="list-header"><h2>People</h2></div>
+      <div id="people-list" class="fin-settings-list"></div>
+      <form id="add-person-form" class="fin-inline-add">
+        <input name="name" type="text" required placeholder="Name" />
+        <input name="color" type="color" value="#3a6ea5" />
+        <button type="submit" class="save-btn">Add person</button>
+      </form>
+      <p class="fin-note">A row tagged to nobody counts as "joint". You can't delete a person still tagged on items.</p>
+    </section>
+
+    <section class="fin-section">
+      <div class="list-header"><h2>Categories</h2></div>
+      <div id="cat-list" class="fin-settings-list"></div>
+      <form id="add-cat-form" class="fin-inline-add">
+        <input name="name" type="text" required placeholder="Category name" />
+        <input name="color" type="color" value="#3f7d5c" />
+        <button type="submit" class="save-btn">Add category</button>
+      </form>
+      <p class="fin-note">Order here is the order categories appear in dropdowns. Can't delete one still in use.</p>
+    </section>
+
+    <div id="app-version"></div>
+  </main>
+
+  <script src="{{ shared_assets_base }}/theme.js"></script>
+  <script src="{{ shared_assets_base }}/icons.js"></script>
+  <script src="version.js"></script>
+  <script src="common.js"></script>
+  <script src="nav.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>
