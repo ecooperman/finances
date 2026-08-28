@@ -57,3 +57,13 @@ def delete_transaction(txn_id: int, db: Session = Depends(get_db)):
     if not crud.delete_transaction(db, txn_id):
         raise HTTPException(status_code=404, detail="Transaction not found")
     return {"ok": True}
+
+
+@router.post("/{txn_id}/convert-to-recurring", response_model=schemas.RecurringItem)
+def convert_to_recurring(
+    txn_id: int, opts: schemas.ConvertToRecurring, db: Session = Depends(get_db)
+):
+    item = crud.convert_transaction_to_recurring(db, txn_id, opts)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    return item

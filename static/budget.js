@@ -171,6 +171,7 @@ function recurringCard(item) {
     recurringEditHTML(item) +
     `<div class="item-actions">
        <button type="submit" class="save-btn">Save changes</button>
+       <button type="button" class="secondary-btn" data-act="to-onetime">Convert to one-time</button>
        <button type="button" class="danger-btn" data-act="delete">Delete</button>
      </div>`;
   inner.appendChild(meta);
@@ -205,6 +206,21 @@ function recurringCard(item) {
     try {
       await fetchJSON(`${API}/recurring/${item.id}`, { method: "DELETE" });
       Global.showMessage(`Deleted "${item.name}".`, "success");
+      load();
+    } catch (err) {
+      Global.showMessage(err.message, "error");
+    }
+  });
+  form.querySelector('[data-act="to-onetime"]').addEventListener("click", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (!confirm(`Turn "${item.name}" into a single one-time transaction dated ${today}? (You can change the date afterward.)`)) return;
+    try {
+      await fetchJSON(`${API}/recurring/${item.id}/convert-to-transaction`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: today }),
+      });
+      Global.showMessage(`"${item.name}" is now a one-time transaction on ${today}.`, "success");
       load();
     } catch (err) {
       Global.showMessage(err.message, "error");
@@ -277,6 +293,7 @@ function txnCard(txn) {
     txnEditHTML(txn) +
     `<div class="item-actions">
        <button type="submit" class="save-btn">Save changes</button>
+       <button type="button" class="secondary-btn" data-act="to-recurring">Convert to recurring</button>
        <button type="button" class="danger-btn" data-act="delete">Delete</button>
      </div>`;
   inner.appendChild(meta);
@@ -311,6 +328,20 @@ function txnCard(txn) {
     try {
       await fetchJSON(`${API}/transactions/${txn.id}`, { method: "DELETE" });
       Global.showMessage("Deleted.", "success");
+      load();
+    } catch (err) {
+      Global.showMessage(err.message, "error");
+    }
+  });
+  form.querySelector('[data-act="to-recurring"]').addEventListener("click", async () => {
+    if (!confirm(`Turn "${txn.description}" into a monthly recurring item? (Open it under Recurring afterward to change the frequency or schedule.)`)) return;
+    try {
+      await fetchJSON(`${API}/transactions/${txn.id}/convert-to-recurring`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ frequency: "monthly" }),
+      });
+      Global.showMessage(`"${txn.description}" is now a monthly recurring item.`, "success");
       load();
     } catch (err) {
       Global.showMessage(err.message, "error");

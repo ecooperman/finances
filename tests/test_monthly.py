@@ -13,7 +13,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app import models
+from app import crud, models, schemas
 from app.services.monthly import compute_month
 
 
@@ -183,6 +183,54 @@ def test_scenario_add_remove_modify(db):
     # a removed row is shown but not counted
     removed = next(r for r in scen.money_out if r.name == "Mortgage")
     assert removed.effect == "removed"
+
+
+def test_transaction_update_schema_accepts_a_date(db):
+    # Regression: the field named `date` typed as `date` used to rebind the
+    # name and leave TransactionUpdate.date accepting only None (422 on any
+    # real PATCH).
+    parsed = schemas.TransactionUpdate(date="2026-08-28", amount_cents=100)
+    assert parsed.date == date(2026, 8, 28)
+    assert schemas.TransactionUpdate().date is None
+
+
+def test_convert_transaction_to_recurring_carries_fields_and_deletes_txn(db):
+    cat = _cat(db)
+    person = _person(db)
+    db.add(models.Transaction(
+        date=date(2026, 3, 14), description="Gym membership", amount_cents=5000,
+        direction="out", category_id=cat.id, person_id=person.id, notes="annual? no, monthly",
+    ))
+    db.commit()
+    txn_id = db.query(models.Transaction).one().id
+
+    item = crud.convert_transaction_to_recurring(
+        db, txn_id, schemas.ConvertToRecurring(frequency="monthly")
+    )
+    assert item.name == "Gym membership"
+    assert item.amount_cents == 5000
+    assert item.direction == "out"
+    assert item.category_id == cat.id and item.person_id == person.id
+    assert item.notes == "annual? no, monthly"
+    assert item.day_of_month == 14  # defaulted from the transaction's date
+    assert item.active is True
+    assert db.query(models.Transaction).count() == 0
+    assert db.query(models.RecurringItem).count() == 1
+
+
+def test_convert_recurring_to_transaction_carries_fields_and_deletes_rule(db):
+    item = _recurring(db, name="Old subscription", amount_cents=1200, direction="out")
+    txn = crud.convert_recurring_to_transaction(db, item.id, date(2026, 9, 1))
+    assert txn.description == "Old subscription"
+    assert txn.amount_cents == 1200
+    assert txn.date == date(2026, 9, 1)
+    assert db.query(models.RecurringItem).count() == 0
+    assert db.query(models.Transaction).count() == 1
+
+
+def test_convert_missing_ids_return_none(db):
+    assert crud.convert_transaction_to_recurring(db, 999, schemas.ConvertToRecurring()) is None
+    assert crud.convert_recurring_to_transaction(db, 999, date(2026, 1, 1)) is None
 
 
 def test_scenario_modify_override_amount(db):

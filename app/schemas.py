@@ -6,7 +6,11 @@ wire format stays exact and symmetric (a PATCH can echo back what a GET
 returned untouched).
 """
 
-from datetime import date, datetime
+# `date` is aliased because the Transaction schemas have a field literally
+# named `date`; `date: Optional[date] = None` would otherwise rebind the
+# name to None before the annotation is evaluated (CPython stores the value
+# first), leaving the field typed as None-only. See TransactionUpdate.
+from datetime import date as date_type, datetime
 from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
@@ -166,7 +170,7 @@ class RecurringItem(RecurringItemBase):
 
 
 class TransactionBase(BaseModel):
-    date: date
+    date: date_type
     description: str
     amount_cents: int
     direction: Direction
@@ -183,7 +187,7 @@ class TransactionCreate(TransactionBase):
 
 
 class TransactionUpdate(BaseModel):
-    date: Optional[date] = None
+    date: Optional[date_type] = None
     description: Optional[str] = None
     amount_cents: Optional[int] = None
     direction: Optional[Direction] = None
@@ -202,6 +206,33 @@ class Transaction(TransactionBase):
     pending: bool
     category: Optional[Category] = None
     person: Optional[Person] = None
+
+
+# Converting between the two kinds: the shared fields (name/amount/
+# direction/category/person/notes) carry over untouched; these bodies only
+# supply what the target kind needs that the source doesn't have.
+
+
+class ConvertToRecurring(BaseModel):
+    frequency: Frequency = "monthly"
+    anchor_month: Optional[int] = None
+    day_of_month: Optional[int] = None
+    start_month: Optional[str] = None
+    end_month: Optional[str] = None
+
+    _check_anchor = field_validator("anchor_month")(_valid_anchor_month)
+    _check_start = field_validator("start_month")(_valid_month_str)
+    _check_end = field_validator("end_month")(_valid_month_str)
+
+    @model_validator(mode="after")
+    def _anchor_required_for_non_monthly(self):
+        if self.frequency != "monthly" and self.anchor_month is None:
+            raise ValueError("anchor_month is required for non-monthly frequencies")
+        return self
+
+
+class ConvertToTransaction(BaseModel):
+    date: date_type
 
 
 # ---------------------------------------------------------------------------

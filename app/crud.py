@@ -226,6 +226,56 @@ def delete_transaction(db: Session, txn_id: int) -> bool:
     return True
 
 
+def convert_transaction_to_recurring(db: Session, txn_id: int, opts: schemas.ConvertToRecurring):
+    """Replace a one-off transaction with an equivalent recurring rule
+    (shared fields carried over; the transaction is deleted). Atomic - one
+    commit."""
+    txn = get_transaction(db, txn_id)
+    if txn is None:
+        return None
+    item = models.RecurringItem(
+        name=txn.description,
+        amount_cents=txn.amount_cents,
+        direction=txn.direction,
+        frequency=opts.frequency,
+        anchor_month=opts.anchor_month,
+        day_of_month=opts.day_of_month if opts.day_of_month is not None else txn.date.day,
+        category_id=txn.category_id,
+        person_id=txn.person_id,
+        start_month=opts.start_month,
+        end_month=opts.end_month,
+        notes=txn.notes,
+        active=True,
+    )
+    db.add(item)
+    db.delete(txn)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def convert_recurring_to_transaction(db: Session, item_id: int, when):
+    """Replace a recurring rule with a single dated transaction on `when`
+    (shared fields carried over; the rule is deleted). Atomic."""
+    item = get_recurring_item(db, item_id)
+    if item is None:
+        return None
+    txn = models.Transaction(
+        date=when,
+        description=item.name,
+        amount_cents=item.amount_cents,
+        direction=item.direction,
+        category_id=item.category_id,
+        person_id=item.person_id,
+        notes=item.notes,
+    )
+    db.add(txn)
+    db.delete(item)
+    db.commit()
+    db.refresh(txn)
+    return txn
+
+
 # ---------------------------------------------------------------------------
 # Scenarios + adjustments
 # ---------------------------------------------------------------------------
