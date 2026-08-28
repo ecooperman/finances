@@ -1,12 +1,21 @@
 # Finances
 
-Household finance tracker for Evan + spouse: set up the **knowns** (monthly
-and non-monthly recurring income/expenses - salaries, mortgage, HOA,
-insurance, ...), log **ad-hoc transactions** that move the needle (big
-one-offs, not every coffee), tag each line with a person and a category,
-and see **money in minus money out** for any month. A **scenario**
-playground layers hypothetical changes (add a car payment, halve the Uber
-spend, drop a line) over the real budget without touching stored data.
+Household finance tracker for Evan + Rach. Two ways of looking at money,
+kept distinct:
+
+- **Cash flow** - what actually leaves the account in a given month
+  (recurring items that land + one-off transactions). The Overview's
+  "This month" total.
+- **Provisioning** - what a well-run month costs: lumpy recurring items
+  smoothed to /month, plus **sinking funds** - money set aside monthly for
+  costs you know are coming but can't schedule (vet visits, car repairs,
+  gifts). The "Provisioned" figure.
+
+Set up the knowns (recurring income/expenses), define funds for the fuzzy
+stuff, log the one-off transactions that move the needle, tag each with a
+person and category, and a **scenario** playground layers hypothetical
+changes (add a car payment, halve the Uber spend, add a fund) over the
+real budget without touching stored data.
 
 Pulling real transactions from bank + credit-card accounts is a planned
 follow-up - see [`SYNC.md`](SYNC.md).
@@ -15,15 +24,25 @@ follow-up - see [`SYNC.md`](SYNC.md).
 
 | Page | What it does |
 |---|---|
-| `/` (Overview) | Month stepper + person/category/scenario filters; money-in and money-out lists with a net at the bottom, plus a smoothed monthly-average net. Read-only rollup + a unified "+ Add". |
-| `/budget.html` | The one place to add and manage every money event. Segmented view (All / Recurring / One-time) over person/category/status/month filters; accordion cards for edit. Footer shows the known monthly baseline. |
-| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments. "Open in Overview" applies one. |
+| `/` (Overview) | Month stepper + person/category/scenario filters; money-in / money-out lists with a cash-flow net, a **Provisioned** figure (recurring smoothed + funds), and a funds status line. Read-only rollup + a unified "+ Add". |
+| `/budget.html` | The one place to add and manage every money event. Segmented view (All / Recurring / One-time) over person/category/status/month filters; always-visible **Funds** section; accordion cards for edit. Footer shows the provisioning baseline. |
+| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments - targeting recurring items **or** funds. "Open in Overview" applies one. |
 | `/settings.html` | Manage the People and Category reference lists. |
 
-**Adding an entry**: one "+ Add" form (on Overview and Budget) with a
-**Repeats** toggle - off saves a dated one-time `Transaction`, on reveals
-the schedule fields and saves a `RecurringItem`. The two are still
-separate tables/endpoints; only the entry point is merged.
+**Adding an entry**: one "+ Add" form (Overview + Budget) with a
+**One-time / Recurring / Fund** toggle - each saves to its own table
+(`Transaction` / `RecurringItem` / `SinkingFund`); only the entry point is
+merged. A one-time transaction can be **tagged to a fund** ("Draw from
+fund"), which still counts as cash flow but also draws the fund's balance
+down.
+
+**Sinking funds**: defined by an annualized amount (entered however you
+think about it - "$1,200/yr", "$85 every 7 weeks", "2× per year"). Each
+contributes `annual / 12` to the provisioning figure every month and
+carries a running **balance** = (accrued since its start month) − (tagged
+transactions), which rolls over across years (overspend goes negative).
+One-off transactions are *not* counted in the provisioning figure - an
+unprovisioned surprise belongs in cash flow.
 
 ## API
 
@@ -33,19 +52,27 @@ Plain JSON REST under `/api` (`/docs` for Swagger):
 - `/api/recurring` - CRUD (filters: `person_id`, `category_id`, `active`);
   `GET /api/recurring/summary` for the smoothed baseline
 - `/api/transactions` - CRUD (filters: `month` or `date_from`/`date_to`,
-  `person_id`, `category_id`)
+  `person_id`, `category_id`); `POST /{id}/convert-to-recurring`
+- `/api/recurring/{id}/convert-to-transaction`
+- `/api/funds` - CRUD; each row carries computed `monthly_contribution_cents`,
+  `balance_cents`, `spent_ytd_cents`; `GET /api/funds/summary` for the
+  fleet roll-up. Balance math lives in `app/services/funds.py`.
 - `/api/scenarios` - CRUD; `POST /api/scenarios/{id}/adjustments`;
-  `PATCH`/`DELETE /api/adjustments/{id}`
+  `PATCH`/`DELETE /api/adjustments/{id}`. Adjustments target
+  `target_recurring_id` **or** `target_fund_id`; a fund `add` uses
+  `add_kind: "fund"`.
 - `GET /api/monthly?month=YYYY-MM&person_id=&joint=&category_ids=&scenario_id=`
-  - the aggregation the Overview page renders (see
-  `app/services/monthly.py`)
+  - the aggregation the Overview page renders (`app/services/monthly.py`).
+  `totals` = cash flow; `normalized` = provisioning (recurring smoothed +
+  funds, one-offs excluded).
 
 Money crosses the API as integer **cents** (`amount_cents`) in both
 directions; the frontend converts at the input/display edge only.
 
 ## Tests
 
-The monthly aggregation is covered by `tests/test_monthly.py`:
+The aggregation and fund math are covered by `tests/test_monthly.py` and
+`tests/test_funds.py`:
 
 ```bash
 cd finances && source venv/bin/activate && pytest
@@ -144,12 +171,17 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
 
 ## Notes
 
-- **Seed data**: the baseline migration seeds two people (`Evan`, `Spouse`
-  - rename `Spouse` on the Settings page) and a starter set of categories.
+- **Seed data**: the baseline migration seeds two people (`Evan`, `Rach`)
+  and a starter set of categories - all editable on the Settings page.
 - **Non-monthly recurring items** land only in their due month(s) for the
-  true cash-flow total, but are spread evenly across the year in the
-  "smoothed monthly average" / "known monthly baseline" figures.
+  cash-flow total, but are spread evenly across the year in the
+  "Provisioned" / "provisioning baseline" figures.
+- **Funds** always contribute their flat `annual / 12` to provisioning,
+  every month, regardless of the selected month. Deleting a fund nulls the
+  `fund_id` on any transactions tagged to it (they stay).
 - **Scenarios never mutate stored rows** - `app/services/monthly.py`
-  applies adjustments to in-memory copies per request.
+  applies adjustments to in-memory copies per request. Recurring/one-off
+  adjustments move `totals` (cash flow); fund adjustments move `normalized`
+  (provisioning) - see `scenario.delta` vs `scenario.normalized_delta`.
 - **`person_id` NULL = joint / whole household** (shown as a "Joint"
   badge), not "unknown".

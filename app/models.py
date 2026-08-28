@@ -36,6 +36,9 @@ FREQUENCIES = ("monthly", "quarterly", "semiannual", "annual")
 # non-monthly item lands in and the "normalized to per-month" figure).
 FREQUENCY_MONTHS = {"monthly": 1, "quarterly": 3, "semiannual": 6, "annual": 12}
 ADJUSTMENT_KINDS = ("add", "remove", "modify")
+# How a sinking fund's contribution rate was entered - stored so the form
+# round-trips. `annual_amount_cents` is always the derived canonical value.
+FUND_ENTRY_UNITS = ("year", "month", "weeks", "months", "times_year")
 
 
 class Person(Base):
@@ -126,12 +129,54 @@ class Transaction(Base):
 
     notes = Column(String, nullable=True)
 
+    # Optional: this one-off spend is drawn from a sinking fund. It still
+    # counts as real cash flow; it also draws down that fund's balance.
+    fund_id = Column(Integer, ForeignKey("funds.id", ondelete="SET NULL"), nullable=True)
+
     # Import plumbing - unused by v1 (everything is "manual") but present now
     # so the phase-2 SimpleFIN sync doesn't need a schema migration on these.
     source = Column(String, nullable=False, default="manual")
     external_id = Column(String, nullable=True)
     account_name = Column(String, nullable=True)
     pending = Column(Boolean, nullable=False, default=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    category = relationship("Category", lazy="joined")
+    person = relationship("Person", lazy="joined")
+    fund = relationship("SinkingFund", lazy="joined")
+
+
+class SinkingFund(Base):
+    """Money set aside every month for a cost you know is coming but can't
+    schedule - vet visits, dog grooming, car repairs, gifts. Contributes
+    `annual_amount_cents / 12` to the monthly *provisioning* total (never
+    cash flow), and carries a running balance = (accrued since start_month)
+    minus (fund-tagged transactions), rolling over across years.
+    """
+
+    __tablename__ = "funds"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)
+    # Canonical contribution rate. Monthly set-aside = round(/12).
+    annual_amount_cents = Column(Integer, nullable=False)
+
+    # How the user typed the rate, so the form can show it back the same way.
+    # entry_unit in FUND_ENTRY_UNITS; entry_period_n is the N for
+    # "every N weeks" / "every N months" / "N times per year".
+    entry_amount_cents = Column(Integer, nullable=True)
+    entry_unit = Column(String, nullable=True)
+    entry_period_n = Column(Integer, nullable=True)
+
+    category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
+    person_id = Column(Integer, ForeignKey("people.id", ondelete="SET NULL"), nullable=True)
+
+    # "YYYY-MM" - accrual starts here (defaults to the creation month).
+    start_month = Column(String, nullable=False)
+    active = Column(Boolean, nullable=False, default=True)
+    notes = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -167,10 +212,15 @@ class ScenarioAdjustment(Base):
     """One tweak within a Scenario. `kind` picks which columns matter:
 
     - "add":    name, amount_cents, direction, frequency, anchor_month,
-                category_id, person_id  (a brand-new hypothetical line)
-    - "remove": target_recurring_id    (pretend this recurring item is gone)
-    - "modify": target_recurring_id + exactly one of multiplier /
-                override_amount_cents  (scale or replace its amount)
+                category_id, person_id  (a brand-new hypothetical line);
+                or, when add_kind="fund": name, amount_cents (annual),
+                category_id, person_id  (a hypothetical sinking fund)
+    - "remove": target_recurring_id OR target_fund_id  (pretend it's gone)
+    - "modify": (target_recurring_id OR target_fund_id) + exactly one of
+                multiplier / override_amount_cents  (scale or replace)
+
+    Recurring/one-off adjustments hit the cash-flow figure; fund adjustments
+    hit the provisioning figure only.
     """
 
     __tablename__ = "scenario_adjustments"
@@ -178,6 +228,8 @@ class ScenarioAdjustment(Base):
     id = Column(Integer, primary_key=True)
     scenario_id = Column(Integer, ForeignKey("scenarios.id", ondelete="CASCADE"), nullable=False)
     kind = Column(String, nullable=False)  # "add" | "remove" | "modify"
+    # For kind="add": "recurring" (default) or "fund".
+    add_kind = Column(String, nullable=False, default="recurring", server_default="recurring")
 
     # --- "add" columns ---
     name = Column(String, nullable=True)
@@ -192,6 +244,7 @@ class ScenarioAdjustment(Base):
     target_recurring_id = Column(
         Integer, ForeignKey("recurring_items.id", ondelete="CASCADE"), nullable=True
     )
+    target_fund_id = Column(Integer, ForeignKey("funds.id", ondelete="CASCADE"), nullable=True)
     multiplier = Column(Float, nullable=True)
     override_amount_cents = Column(Integer, nullable=True)
 
@@ -204,3 +257,4 @@ class ScenarioAdjustment(Base):
     category = relationship("Category", lazy="joined")
     person = relationship("Person", lazy="joined")
     target_recurring = relationship("RecurringItem", lazy="joined")
+    target_fund = relationship("SinkingFund", lazy="joined")

@@ -88,27 +88,36 @@ function totalsBlock(title, totals, { muted } = {}) {
 
 function renderTotals(data) {
   totalsEl.innerHTML = "";
-  totalsEl.appendChild(totalsBlock("This month", data.totals));
+  totalsEl.appendChild(totalsBlock("This month (cash flow)", data.totals));
   totalsEl.appendChild(
     el("p", { class: "fin-normalized" }, [
-      "Smoothed monthly average (lumpy items spread evenly): ",
+      "Provisioned — recurring smoothed + funds set aside: ",
       el("strong", { text: fmtSignedMoney(data.normalized.net_cents) }),
     ])
   );
+  if (FUNDS_STATUS) {
+    const f = FUNDS_STATUS;
+    totalsEl.appendChild(
+      el("p", { class: "fin-normalized" }, [
+        `Funds: ${f.active_count} active · ${fmtMoney(f.monthly_total_cents)}/mo set aside · `,
+        el("strong", { text: `${fmtMoney(f.banked_total_cents)} banked` }),
+      ])
+    );
+  }
 
   if (data.scenario) {
     totalsEl.appendChild(totalsBlock(`Scenario: ${data.scenario.name}`, data.scenario.totals));
     const d = data.scenario.delta;
-    totalsEl.appendChild(
+    const nd = data.scenario.normalized_delta;
+    const deltaLine = (label, cents) =>
       el("p", { class: "fin-delta" }, [
-        "Scenario changes the month's net by ",
-        el("strong", {
-          class: d.net_cents < 0 ? "fin-net-neg" : "fin-net-pos",
-          text: fmtSignedMoney(d.net_cents),
-        }),
-        ".",
-      ])
-    );
+        `${label} `,
+        el("strong", { class: cents < 0 ? "fin-net-neg" : "fin-net-pos", text: fmtSignedMoney(cents) }),
+      ]);
+    totalsEl.appendChild(deltaLine("Scenario changes cash-flow net by", d.net_cents));
+    if (nd.net_cents !== d.net_cents) {
+      totalsEl.appendChild(deltaLine("… and provisioned net by", nd.net_cents));
+    }
   }
 }
 
@@ -124,10 +133,16 @@ function buildQuery() {
   return p.toString();
 }
 
+let FUNDS_STATUS = null;
+
 async function render() {
   monthLabelEl.textContent = monthLabel(state.month);
   try {
-    const data = await fetchJSON(`${API}/monthly?${buildQuery()}`);
+    const [data, fundsSummary] = await Promise.all([
+      fetchJSON(`${API}/monthly?${buildQuery()}`),
+      fetchJSON(`${API}/funds/summary?month=${state.month}`).catch(() => null),
+    ]);
+    FUNDS_STATUS = fundsSummary;
     const inRows = data.scenario ? data.scenario.money_in : data.money_in;
     const outRows = data.scenario ? data.scenario.money_out : data.money_out;
     renderList(inList, inRows);
@@ -144,15 +159,18 @@ async function render() {
 
 let PEOPLE = [];
 let CATEGORIES = [];
+let FUNDS = [];
 
 async function initFilters() {
-  const [people, categories, scenarios] = await Promise.all([
+  const [people, categories, scenarios, funds] = await Promise.all([
     loadPeople(),
     loadCategories(),
     loadScenarios(),
+    fetchJSON(`${API}/funds`),
   ]);
   PEOPLE = people;
   CATEGORIES = categories;
+  FUNDS = funds;
 
   fillPersonFilter(personSelect, people);
   personSelect.value = state.personVal;
@@ -210,7 +228,7 @@ function buildAddForm() {
        <button type="submit" class="save-btn">Add</button>
        <button type="button" id="cancel-add" class="cancel-btn">Cancel</button>
      </div>`;
-  wireEntryForm(addForm, PEOPLE, CATEGORIES);
+  wireEntryForm(addForm, PEOPLE, CATEGORIES, FUNDS);
   addForm.querySelector("#cancel-add").addEventListener("click", () => {
     addForm.classList.add("hidden");
     buildAddForm();
@@ -231,7 +249,7 @@ addForm.addEventListener("submit", async (e) => {
     await submitEntry(entry);
     addForm.classList.add("hidden");
     buildAddForm();
-    Global.showMessage(entry.type === "recurring" ? "Recurring item added." : "Transaction added.", "success");
+    Global.showMessage(ENTRY_ADDED_MESSAGE[entry.type], "success");
     render();
   } catch (err2) {
     Global.showMessage(err2.message, "error");

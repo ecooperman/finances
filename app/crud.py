@@ -277,6 +277,62 @@ def convert_recurring_to_transaction(db: Session, item_id: int, when):
 
 
 # ---------------------------------------------------------------------------
+# Sinking funds
+# ---------------------------------------------------------------------------
+
+
+def get_funds(
+    db: Session,
+    person_id: Optional[int] = None,
+    category_id: Optional[int] = None,
+    active: Optional[bool] = None,
+):
+    q = db.query(models.SinkingFund)
+    if person_id is not None:
+        q = q.filter(models.SinkingFund.person_id == person_id)
+    if category_id is not None:
+        q = q.filter(models.SinkingFund.category_id == category_id)
+    if active is not None:
+        q = q.filter(models.SinkingFund.active == active)
+    return q.order_by(models.SinkingFund.name).all()
+
+
+def get_fund(db: Session, fund_id: int):
+    return db.query(models.SinkingFund).filter(models.SinkingFund.id == fund_id).first()
+
+
+def create_fund(db: Session, fund: schemas.FundCreate, default_start_month: str):
+    data = fund.model_dump()
+    if not data.get("start_month"):
+        data["start_month"] = default_start_month
+    db_fund = models.SinkingFund(**data)
+    db.add(db_fund)
+    db.commit()
+    db.refresh(db_fund)
+    return db_fund
+
+
+def update_fund(db: Session, fund_id: int, updates: schemas.FundUpdate):
+    db_fund = get_fund(db, fund_id)
+    if db_fund is None:
+        return None
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(db_fund, field, value)
+    db.commit()
+    db.refresh(db_fund)
+    return db_fund
+
+
+def delete_fund(db: Session, fund_id: int) -> bool:
+    db_fund = get_fund(db, fund_id)
+    if db_fund is None:
+        return False
+    db.delete(db_fund)  # tagged transactions' fund_id -> NULL via FK
+    db.commit()
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Scenarios + adjustments
 # ---------------------------------------------------------------------------
 
@@ -341,8 +397,8 @@ def update_adjustment(db: Session, adjustment_id: int, adj: schemas.ScenarioAdju
     # an adjustment's `kind` doesn't leave stale fields from the old shape.
     payload = adj.model_dump()
     for field in (
-        "kind", "name", "amount_cents", "direction", "frequency", "anchor_month",
-        "category_id", "person_id", "target_recurring_id", "multiplier",
+        "kind", "add_kind", "name", "amount_cents", "direction", "frequency", "anchor_month",
+        "category_id", "person_id", "target_recurring_id", "target_fund_id", "multiplier",
         "override_amount_cents", "notes",
     ):
         setattr(db_adj, field, payload.get(field))

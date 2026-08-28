@@ -1,9 +1,10 @@
 // Budget - the single place to add and manage every money event:
-// recurring rules (salaries, mortgage, HOA, insurance, ...) AND one-off
-// transactions. The segmented control picks which you're looking at; the
-// "+ Add" form (common.js) has a Repeats toggle that decides which kind
-// you're creating. Footer shows the known monthly baseline (recurring,
-// non-monthly items smoothed to /month).
+// recurring rules, one-off transactions, and sinking funds (money set
+// aside monthly for costs you know are coming but can't schedule). The
+// segmented control picks which of the first two you're looking at; the
+// Funds section is always shown. The "+ Add" form (common.js) has a
+// One-time / Recurring / Fund toggle. Footer shows the provisioning
+// baseline: recurring smoothed to /month, plus fund set-asides.
 
 const segEl = document.getElementById("view-seg");
 const personSelect = document.getElementById("filter-person");
@@ -23,6 +24,9 @@ const recurringEmpty = document.getElementById("recurring-empty");
 const onetimeEmpty = document.getElementById("onetime-empty");
 const recurringCount = document.getElementById("recurring-count");
 const onetimeSub = document.getElementById("onetime-sub");
+const fundsList = document.getElementById("funds-list");
+const fundsEmpty = document.getElementById("funds-empty");
+const fundsCount = document.getElementById("funds-count");
 const baselineEl = document.getElementById("baseline");
 
 const state = {
@@ -36,6 +40,7 @@ const state = {
 
 let PEOPLE = [];
 let CATEGORIES = [];
+let FUNDS = [];
 
 // --- shared helpers ---------------------------------------------------
 
@@ -44,9 +49,12 @@ function populateSelects(scope, item) {
   const per = scope.querySelector('[name="person_id"]');
   fillSelect(cat, CATEGORIES.map((c) => ({ value: c.id, label: c.name })), { blankLabel: "— none —" });
   fillSelect(per, PEOPLE.map((p) => ({ value: p.id, label: p.name })), { blankLabel: "Joint" });
+  const fundSel = scope.querySelector('[name="fund_id"]');
+  if (fundSel) fillSelect(fundSel, FUNDS.map((f) => ({ value: f.id, label: f.name })), { blankLabel: "— none —" });
   if (item) {
     cat.value = item.category_id || "";
     per.value = item.person_id || "";
+    if (fundSel) fundSel.value = item.fund_id || "";
   }
 }
 
@@ -77,7 +85,7 @@ function buildAddForm() {
        <button type="submit" class="save-btn">Add</button>
        <button type="button" id="cancel-add" class="cancel-btn">Cancel</button>
      </div>`;
-  wireEntryForm(addForm, PEOPLE, CATEGORIES);
+  wireEntryForm(addForm, PEOPLE, CATEGORIES, FUNDS);
   addForm.querySelector("#cancel-add").addEventListener("click", () => {
     addForm.classList.add("hidden");
     buildAddForm();
@@ -93,7 +101,7 @@ addForm.addEventListener("submit", async (e) => {
     await submitEntry(entry);
     addForm.classList.add("hidden");
     buildAddForm();
-    Global.showMessage(entry.type === "recurring" ? "Recurring item added." : "Transaction added.", "success");
+    Global.showMessage(ENTRY_ADDED_MESSAGE[entry.type], "success");
     load();
   } catch (err2) {
     Global.showMessage(err2.message, "error");
@@ -258,6 +266,7 @@ function txnEditHTML(t) {
       <div class="field"><label>Category</label><select name="category_id"></select></div>
       <div class="field"><label>Person</label><select name="person_id"></select></div>
       <div class="field"><label>Account (optional)</label><input name="account_name" type="text" value="${escAttr(t.account_name)}" /></div>
+      <div class="field"><label>Draw from fund (optional)</label><select name="fund_id"></select></div>
     </div>
     <div class="field"><label>Notes</label><textarea name="notes" rows="2">${escText(t.notes)}</textarea></div>`;
 }
@@ -272,6 +281,7 @@ function readTxn(scope) {
     category_id: g("category_id").value || null,
     person_id: g("person_id").value || null,
     account_name: g("account_name").value.trim() || null,
+    fund_id: g("fund_id").value ? Number(g("fund_id").value) : null,
     notes: g("notes").value.trim() || null,
   };
 }
@@ -351,25 +361,185 @@ function txnCard(txn) {
   return wrap;
 }
 
-// --- baseline footer --------------------------------------------
+// --- fund cards ------------------------------------------------
+
+const FUND_UNITS = [
+  ["year", "per year"],
+  ["month", "per month"],
+  ["weeks", "every N weeks"],
+  ["months", "every N months"],
+  ["times_year", "N times per year"],
+];
+
+function fundFieldsHTML(f) {
+  f = f || {};
+  const unit = f.entry_unit || "year";
+  const optu = (v, l) => `<option value="${v}"${v === unit ? " selected" : ""}>${l}</option>`;
+  // If we don't have the original entry, show the annual amount as "per year".
+  const amount =
+    f.entry_amount_cents != null ? centsToInputValue(f.entry_amount_cents)
+    : f.annual_amount_cents != null ? centsToInputValue(f.annual_amount_cents)
+    : "";
+  return `
+    <div class="field">
+      <label>Name <span class="required">*</span></label>
+      <input name="name" type="text" required value="${escAttr(f.name)}" />
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label>Amount ($) <span class="required">*</span></label>
+        <input name="fund_amount" type="text" inputmode="decimal" required value="${amount}" placeholder="85.00" />
+      </div>
+      <div class="field">
+        <label>How often</label>
+        <select name="fund_unit">${FUND_UNITS.map(([v, l]) => optu(v, l)).join("")}</select>
+      </div>
+      <div class="field fin-fund-n-field${["weeks", "months", "times_year"].includes(unit) ? "" : " hidden"}">
+        <label>N</label>
+        <input name="fund_period_n" type="number" min="1" value="${f.entry_period_n || ""}" placeholder="7" />
+      </div>
+    </div>
+    <p class="fin-fund-preview">≈ <strong data-role="fund-preview">$0.00</strong> / month set aside</p>
+    <div class="field-row">
+      <div class="field"><label>Category</label><select name="category_id"></select></div>
+      <div class="field"><label>Person</label><select name="person_id"></select></div>
+      <div class="field"><label>Accrual starts</label><input name="fund_start_month" type="month" value="${f.start_month || ""}" /></div>
+    </div>
+    <label class="checkbox-label"><input name="active" type="checkbox"${f.active ? " checked" : ""} /> Active</label>
+    <div class="field"><label>Notes</label><textarea name="notes" rows="2">${escText(f.notes)}</textarea></div>`;
+}
+
+function wireFundForm(scope) {
+  const unit = scope.querySelector('[name="fund_unit"]');
+  const nField = scope.querySelector(".fin-fund-n-field");
+  const amount = scope.querySelector('[name="fund_amount"]');
+  const n = scope.querySelector('[name="fund_period_n"]');
+  const preview = scope.querySelector('[data-role="fund-preview"]');
+  const refresh = () => {
+    nField.classList.toggle("hidden", !["weeks", "months", "times_year"].includes(unit.value));
+    const annual = fundAnnualCents(dollarsToCents(amount.value), unit.value, n.value);
+    preview.textContent = annual == null ? "$0.00" : fmtMoney(Math.round(annual / 12));
+  };
+  unit.addEventListener("change", refresh);
+  amount.addEventListener("input", refresh);
+  n.addEventListener("input", refresh);
+  refresh();
+}
+
+function readFund(scope) {
+  const g = (name) => scope.querySelector(`[name="${name}"]`);
+  const unit = g("fund_unit").value;
+  const nVal = g("fund_period_n").value ? Number(g("fund_period_n").value) : null;
+  const entry_amount_cents = dollarsToCents(g("fund_amount").value);
+  return {
+    name: g("name").value.trim(),
+    annual_amount_cents: fundAnnualCents(entry_amount_cents, unit, nVal),
+    entry_amount_cents,
+    entry_unit: unit,
+    entry_period_n: nVal,
+    category_id: g("category_id").value || null,
+    person_id: g("person_id").value || null,
+    start_month: g("fund_start_month").value || null,
+    active: g("active").checked,
+    notes: g("notes").value.trim() || null,
+  };
+}
+
+function fundCard(fund) {
+  const wrap = el("div", { class: "item-card" + (fund.active ? "" : " archived") });
+  const negative = fund.balance_cents < 0;
+  const summary = el("button", { class: "item-summary", type: "button", "aria-expanded": "false" }, [
+    el("span", { class: "item-summary-title", text: fund.name }),
+    !fund.active ? el("span", { class: "fin-tag fin-tag-removed", text: "paused" }) : null,
+    el("span", {
+      class: "fin-balance-pill " + (negative ? "fin-balance-neg" : "fin-balance-pos"),
+      text: negative ? `${fmtMoney(fund.balance_cents)} over` : `${fmtMoney(fund.balance_cents)} banked`,
+    }),
+    el("span", { class: "fin-item-amount fin-amount-out", text: `${fmtMoney(fund.monthly_contribution_cents)}/mo` }),
+    el("span", { class: "item-chevron", "aria-hidden": "true", text: "▸" }),
+  ]);
+  const meta = el("div", { class: "fin-card-meta" }, [categoryChip(fund.category), personBadge(fund.person)]);
+  const status = el("p", { class: "fin-fund-status", text:
+    `This year: set aside ${fmtMoney(fund.monthly_contribution_cents * 12)}/yr · spent ${fmtMoney(fund.spent_ytd_cents)}` });
+
+  const details = el("div", { class: "item-details hidden" });
+  const inner = el("div", { class: "item-details-inner" });
+  const form = el("form", { class: "fin-edit-form" });
+  form.innerHTML =
+    fundFieldsHTML(fund) +
+    `<div class="item-actions">
+       <button type="submit" class="save-btn">Save changes</button>
+       <button type="button" class="danger-btn" data-act="delete">Delete</button>
+     </div>`;
+  inner.appendChild(meta);
+  inner.appendChild(status);
+  inner.appendChild(form);
+  details.appendChild(inner);
+  wrap.appendChild(summary);
+  wrap.appendChild(details);
+
+  populateSelects(form, fund);
+  wireFundForm(form);
+  Global.wireAccordionToggle(wrap, summary, details);
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = readFund(form);
+    if (!body.name) return Global.showMessage("Name is required.", "error");
+    if (body.annual_amount_cents == null || body.annual_amount_cents <= 0)
+      return Global.showMessage("Enter a positive amount (and an N for 'every N ...').", "error");
+    try {
+      await fetchJSON(`${API}/funds/${fund.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      Global.showMessage("Saved.", "success");
+      load();
+    } catch (err) {
+      Global.showMessage(err.message, "error");
+    }
+  });
+  form.querySelector('[data-act="delete"]').addEventListener("click", async () => {
+    if (!confirm(`Delete the "${fund.name}" fund? Transactions tagged to it stay, just untagged.`)) return;
+    try {
+      await fetchJSON(`${API}/funds/${fund.id}`, { method: "DELETE" });
+      Global.showMessage(`Deleted "${fund.name}".`, "success");
+      load();
+    } catch (err) {
+      Global.showMessage(err.message, "error");
+    }
+  });
+
+  return wrap;
+}
+
+// --- provisioning footer --------------------------------------------
 
 async function renderBaseline() {
   try {
-    const s = await fetchJSON(`${API}/recurring/summary`);
+    const [rec, funds] = await Promise.all([
+      fetchJSON(`${API}/recurring/summary`),
+      fetchJSON(`${API}/funds/summary`),
+    ]);
+    const outTotal = rec.out_cents + funds.monthly_total_cents;
+    const net = rec.in_cents - outTotal;
     baselineEl.innerHTML = "";
     baselineEl.appendChild(
       el("div", { class: "fin-total-group" }, [
-        el("div", { class: "fin-total-title", text: "Known monthly baseline" }),
-        el("div", { class: "fin-total-row" }, [el("span", { text: "Money in" }), el("span", { class: "fin-amount-in", text: fmtMoney(s.in_cents) })]),
-        el("div", { class: "fin-total-row" }, [el("span", { text: "Money out" }), el("span", { class: "fin-amount-out", text: fmtMoney(s.out_cents) })]),
+        el("div", { class: "fin-total-title", text: "Provisioning baseline (per month)" }),
+        el("div", { class: "fin-total-row" }, [el("span", { text: "Money in" }), el("span", { class: "fin-amount-in", text: fmtMoney(rec.in_cents) })]),
+        el("div", { class: "fin-total-row" }, [el("span", { text: "Recurring out (smoothed)" }), el("span", { class: "fin-amount-out", text: fmtMoney(rec.out_cents) })]),
+        el("div", { class: "fin-total-row" }, [el("span", { text: "Funds set aside" }), el("span", { class: "fin-amount-out", text: fmtMoney(funds.monthly_total_cents) })]),
         el("div", { class: "fin-total-row fin-total-net" }, [
           el("span", { text: "Net / month" }),
-          el("span", { class: "fin-net " + (s.net_cents < 0 ? "fin-net-neg" : "fin-net-pos"), text: fmtSignedMoney(s.net_cents) }),
+          el("span", { class: "fin-net " + (net < 0 ? "fin-net-neg" : "fin-net-pos"), text: fmtSignedMoney(net) }),
         ]),
       ])
     );
     baselineEl.appendChild(
-      el("p", { class: "fin-normalized", text: "Recurring only. Non-monthly items (annual, quarterly, ...) are spread evenly across the year here." })
+      el("p", { class: "fin-normalized", text:
+        "Non-monthly recurring items are spread evenly across the year; one-off transactions are not counted here." })
     );
   } catch (err) {
     /* non-fatal */
@@ -404,6 +574,28 @@ async function loadOnetime() {
   onetimeSub.textContent = `${rows.length} · ${scope}`;
 }
 
+async function loadFunds() {
+  const p = new URLSearchParams();
+  if (state.personVal && state.personVal !== "joint") p.set("person_id", state.personVal);
+  let funds = await fetchJSON(`${API}/funds?${p.toString()}`);
+  FUNDS = funds; // keep the shared list current for the add form / txn pickers
+  const addFundSel = addForm.querySelector('[name="fund_id"]');
+  if (addFundSel) {
+    const prev = addFundSel.value;
+    fillSelect(addFundSel, FUNDS.map((f) => ({ value: f.id, label: f.name })), { blankLabel: "— none —" });
+    addFundSel.value = prev;
+  }
+  if (state.personVal === "joint") funds = funds.filter((f) => f.person_id == null);
+  if (state.categoryIds.length) {
+    const set = new Set(state.categoryIds.map(String));
+    funds = funds.filter((f) => set.has(String(f.category_id)));
+  }
+  fundsList.innerHTML = "";
+  funds.forEach((f) => fundsList.appendChild(fundCard(f)));
+  fundsEmpty.classList.toggle("hidden", funds.length > 0);
+  fundsCount.textContent = `${funds.length} fund${funds.length === 1 ? "" : "s"}`;
+}
+
 async function load() {
   const showRec = state.view === "all" || state.view === "recurring";
   const showOne = state.view === "all" || state.view === "onetime";
@@ -414,7 +606,7 @@ async function load() {
   allTimeBtn.classList.toggle("hidden", !showOne);
 
   try {
-    const jobs = [renderBaseline()];
+    const jobs = [renderBaseline(), loadFunds()];
     if (showRec) jobs.push(loadRecurring());
     if (showOne) jobs.push(loadOnetime());
     await Promise.all(jobs);
@@ -432,7 +624,11 @@ function setView(view) {
 }
 
 async function init() {
-  [PEOPLE, CATEGORIES] = await Promise.all([loadPeople(), loadCategories()]);
+  [PEOPLE, CATEGORIES, FUNDS] = await Promise.all([
+    loadPeople(),
+    loadCategories(),
+    fetchJSON(`${API}/funds`),
+  ]);
 
   [...segEl.children].forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
 

@@ -136,7 +136,7 @@ def _seed() -> None:
 
     op.bulk_insert(people, [
         {"name": "Evan", "color": "#2b6f5c"},
-        {"name": "Spouse", "color": "#7b4fa3"},
+        {"name": "Rach", "color": "#7b4fa3"},
     ])
 
     starter = [

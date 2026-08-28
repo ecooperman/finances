@@ -18,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 Direction = Literal["in", "out"]
 Frequency = Literal["monthly", "quarterly", "semiannual", "annual"]
 AdjustmentKind = Literal["add", "remove", "modify"]
+AddKind = Literal["recurring", "fund"]
+FundEntryUnit = Literal["year", "month", "weeks", "months", "times_year"]
 
 
 def _positive_cents(v: Optional[int]) -> Optional[int]:
@@ -178,6 +180,7 @@ class TransactionBase(BaseModel):
     person_id: Optional[int] = None
     notes: Optional[str] = None
     account_name: Optional[str] = None
+    fund_id: Optional[int] = None
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
 
@@ -195,6 +198,7 @@ class TransactionUpdate(BaseModel):
     person_id: Optional[int] = None
     notes: Optional[str] = None
     account_name: Optional[str] = None
+    fund_id: Optional[int] = None
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
 
@@ -236,25 +240,114 @@ class ConvertToTransaction(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Sinking funds
+# ---------------------------------------------------------------------------
+
+
+def _entry_period_needed(obj):
+    if obj.entry_unit in ("weeks", "months", "times_year") and not obj.entry_period_n:
+        raise ValueError("entry_period_n is required for that entry unit")
+    return obj
+
+
+class FundBase(BaseModel):
+    name: str
+    annual_amount_cents: int  # canonical rate; monthly set-aside = round(/12)
+    # How the rate was typed, so the form shows it back the same way.
+    entry_amount_cents: Optional[int] = None
+    entry_unit: Optional[FundEntryUnit] = None
+    entry_period_n: Optional[int] = None
+    category_id: Optional[int] = None
+    person_id: Optional[int] = None
+    start_month: Optional[str] = None  # server defaults to the creation month
+    active: bool = True
+    notes: Optional[str] = None
+
+    _check_amount = field_validator("annual_amount_cents")(_positive_cents)
+    _check_start = field_validator("start_month")(_valid_month_str)
+
+    @model_validator(mode="after")
+    def _check_entry(self):
+        return _entry_period_needed(self)
+
+
+class FundCreate(FundBase):
+    pass
+
+
+class FundUpdate(BaseModel):
+    name: Optional[str] = None
+    annual_amount_cents: Optional[int] = None
+    entry_amount_cents: Optional[int] = None
+    entry_unit: Optional[FundEntryUnit] = None
+    entry_period_n: Optional[int] = None
+    category_id: Optional[int] = None
+    person_id: Optional[int] = None
+    start_month: Optional[str] = None
+    active: Optional[bool] = None
+    notes: Optional[str] = None
+
+    _check_amount = field_validator("annual_amount_cents")(_positive_cents)
+    _check_start = field_validator("start_month")(_valid_month_str)
+
+    @model_validator(mode="after")
+    def _check_entry(self):
+        return _entry_period_needed(self)
+
+
+class Fund(FundBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    category: Optional[Category] = None
+    person: Optional[Person] = None
+
+
+class FundWithStatus(Fund):
+    # Filled by the router from services.funds.fund_status.
+    monthly_contribution_cents: int
+    accrued_cents: int
+    spent_cents: int
+    balance_cents: int
+    spent_ytd_cents: int
+
+
+class FundsSummary(BaseModel):
+    active_count: int
+    monthly_total_cents: int
+    banked_total_cents: int
+
+
+# ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
 
 
 def _check_adjustment_shape(obj):
     """Per-`kind` required-field rules, shared by the create and update
-    schemas (both carry the full adjustment body)."""
+    schemas (both carry the full adjustment body). A remove/modify targets
+    either a recurring item (`target_recurring_id`) or a fund
+    (`target_fund_id`) - exactly one."""
     if obj.kind == "add":
-        missing = [f for f in ("name", "amount_cents", "direction") if getattr(obj, f) is None]
-        if missing:
-            raise ValueError(f"'add' adjustment requires: {', '.join(missing)}")
-        if obj.frequency and obj.frequency != "monthly" and obj.anchor_month is None:
-            raise ValueError("anchor_month is required for non-monthly 'add' adjustments")
-    elif obj.kind == "remove":
-        if obj.target_recurring_id is None:
-            raise ValueError("'remove' adjustment requires target_recurring_id")
-    elif obj.kind == "modify":
-        if obj.target_recurring_id is None:
-            raise ValueError("'modify' adjustment requires target_recurring_id")
+        if obj.add_kind == "fund":
+            missing = [f for f in ("name", "amount_cents") if getattr(obj, f) is None]
+            if missing:
+                raise ValueError(f"'add' fund requires: {', '.join(missing)}")
+        else:
+            missing = [f for f in ("name", "amount_cents", "direction") if getattr(obj, f) is None]
+            if missing:
+                raise ValueError(f"'add' adjustment requires: {', '.join(missing)}")
+            if obj.frequency and obj.frequency != "monthly" and obj.anchor_month is None:
+                raise ValueError("anchor_month is required for non-monthly 'add' adjustments")
+        return obj
+
+    has_recurring = obj.target_recurring_id is not None
+    has_fund = obj.target_fund_id is not None
+    if has_recurring == has_fund:
+        raise ValueError(
+            f"'{obj.kind}' adjustment requires exactly one of "
+            "target_recurring_id / target_fund_id"
+        )
+    if obj.kind == "modify":
         has_mult = obj.multiplier is not None
         has_override = obj.override_amount_cents is not None
         if has_mult == has_override:
@@ -268,7 +361,9 @@ def _check_adjustment_shape(obj):
 
 class ScenarioAdjustmentCreate(BaseModel):
     kind: AdjustmentKind
-    # "add" fields
+    # "add" fields. add_kind picks recurring line vs. sinking fund; for a
+    # fund, amount_cents is the annual rate and direction/frequency are unused.
+    add_kind: AddKind = "recurring"
     name: Optional[str] = None
     amount_cents: Optional[int] = None
     direction: Optional[Direction] = None
@@ -276,8 +371,9 @@ class ScenarioAdjustmentCreate(BaseModel):
     anchor_month: Optional[int] = None
     category_id: Optional[int] = None
     person_id: Optional[int] = None
-    # "remove" / "modify" fields
+    # "remove" / "modify" fields - target exactly one of these
     target_recurring_id: Optional[int] = None
+    target_fund_id: Optional[int] = None
     multiplier: Optional[float] = None
     override_amount_cents: Optional[int] = None
     notes: Optional[str] = None
@@ -302,6 +398,7 @@ class ScenarioAdjustment(BaseModel):
     id: int
     scenario_id: int
     kind: str
+    add_kind: str = "recurring"
     name: Optional[str] = None
     amount_cents: Optional[int] = None
     direction: Optional[str] = None
@@ -310,12 +407,14 @@ class ScenarioAdjustment(BaseModel):
     category_id: Optional[int] = None
     person_id: Optional[int] = None
     target_recurring_id: Optional[int] = None
+    target_fund_id: Optional[int] = None
     multiplier: Optional[float] = None
     override_amount_cents: Optional[int] = None
     notes: Optional[str] = None
     category: Optional[Category] = None
     person: Optional[Person] = None
     target_recurring: Optional[RecurringItem] = None
+    target_fund: Optional[Fund] = None
 
 
 class ScenarioBase(BaseModel):
@@ -344,7 +443,7 @@ class Scenario(ScenarioBase):
 
 
 class MonthRow(BaseModel):
-    kind: Literal["recurring", "transaction"]
+    kind: Literal["recurring", "transaction", "fund"]
     id: int
     name: str
     amount_cents: int
@@ -375,7 +474,8 @@ class MonthSide(BaseModel):
 class ScenarioMonthResult(MonthSide):
     id: int
     name: str
-    delta: MonthTotals
+    delta: MonthTotals  # cash-flow change vs. the real month
+    normalized_delta: MonthTotals  # provisioning change (where fund adjustments land)
 
 
 class MonthResult(MonthSide):

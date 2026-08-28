@@ -79,6 +79,54 @@
   color: #fff;
 }
 
+/* The add form's One-time / Recurring / Fund switch fills the row. */
+.fin-entry-type {
+  display: flex;
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+.fin-entry-type button {
+  flex: 1;
+}
+
+/* --- sinking funds --- */
+
+.fin-balance-pill {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.fin-balance-pos {
+  color: var(--in);
+  background: var(--in-bg);
+}
+
+.fin-balance-neg {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.fin-fund-preview {
+  margin: 4px 2px 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.fin-fund-preview strong {
+  color: var(--text);
+}
+
+.fin-fund-status {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 12px;
+}
+
 /* --- filter row --- */
 
 .fin-filters {

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..models import FREQUENCY_MONTHS
+from .funds import monthly_contribution_cents
 from ..schemas import (
     Category,
     MonthResult,
@@ -138,6 +139,20 @@ def _txn_rows(db, start, end, filters) -> List[dict]:
     return rows
 
 
+def _fund_rows(db, filters) -> List[dict]:
+    """Provisioning-only rows: each active sinking fund's flat monthly
+    set-aside, on the `out` side. Never part of the cash-flow figure."""
+    rows = []
+    for fund in db.query(models.SinkingFund).filter(models.SinkingFund.active.is_(True)).all():
+        if not _passes_filters(fund.person_id, fund.category_id, *filters):
+            continue
+        rows.append(_row(
+            "fund", fund.id, fund.name, monthly_contribution_cents(fund), "out",
+            category=_cat(fund.category), person=_person(fund.person),
+        ))
+    return rows
+
+
 def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: bool) -> List[dict]:
     """Return a fresh row list with the scenario's adjustments applied.
 
@@ -146,49 +161,77 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
     """
     rows = [dict(r) for r in base_rows]
     by_recurring_id = {r["id"]: r for r in rows if r["kind"] == "recurring"}
+    by_fund_id = {r["id"]: r for r in rows if r["kind"] == "fund"}
 
     for adj in adjustments:
+        is_fund = adj.target_fund_id is not None or (
+            adj.kind == "add" and getattr(adj, "add_kind", "recurring") == "fund"
+        )
+        # Fund adjustments only move the provisioning figure, never cash flow.
+        if is_fund and not normalized:
+            continue
+
         if adj.kind == "remove":
-            target = by_recurring_id.get(adj.target_recurring_id)
+            target = (
+                by_fund_id.get(adj.target_fund_id)
+                if is_fund
+                else by_recurring_id.get(adj.target_recurring_id)
+            )
             if target is not None:
                 target["effect"] = "removed"
+
         elif adj.kind == "modify":
-            target = by_recurring_id.get(adj.target_recurring_id)
+            target = (
+                by_fund_id.get(adj.target_fund_id)
+                if is_fund
+                else by_recurring_id.get(adj.target_recurring_id)
+            )
             if target is None or target["effect"] == "removed":
                 continue
             original = target["amount_cents"]
             if adj.override_amount_cents is not None:
-                # `original` is already normalized (divided) when normalized=True,
-                # so divide the override the same way to stay comparable.
-                interval = FREQUENCY_MONTHS.get(target.get("frequency") or "monthly", 1)
-                new_amount = (
-                    round(adj.override_amount_cents / interval)
-                    if normalized
-                    else adj.override_amount_cents
-                )
+                if is_fund:
+                    # override is an annual amount; row holds the monthly set-aside
+                    new_amount = round(adj.override_amount_cents / 12)
+                else:
+                    # `original` is already divided when normalized=True, so
+                    # divide the override the same way to stay comparable.
+                    interval = FREQUENCY_MONTHS.get(target.get("frequency") or "monthly", 1)
+                    new_amount = (
+                        round(adj.override_amount_cents / interval)
+                        if normalized
+                        else adj.override_amount_cents
+                    )
             else:
                 new_amount = round(original * adj.multiplier)
             target["amount_cents"] = new_amount
             target["original_amount_cents"] = original
             target["effect"] = "modified"
+
         elif adj.kind == "add":
             if not _passes_filters(adj.person_id, adj.category_id, *filters):
                 continue
-            freq = adj.frequency or "monthly"
-            if normalized:
-                interval = FREQUENCY_MONTHS.get(freq, 1)
-                amount = round(adj.amount_cents / interval)
-            else:
-                if not _cadence_hits(freq, adj.anchor_month, mon):
-                    continue
-                amount = adj.amount_cents
             cat = db.get(models.Category, adj.category_id) if adj.category_id else None
             per = db.get(models.Person, adj.person_id) if adj.person_id else None
-            rows.append(_row(
-                "recurring", -adj.id, adj.name, amount, adj.direction,
-                frequency=freq, day=None, category=_cat(cat), person=_person(per),
-                effect="added",
-            ))
+            if is_fund:
+                rows.append(_row(
+                    "fund", -adj.id, adj.name, round(adj.amount_cents / 12), "out",
+                    category=_cat(cat), person=_person(per), effect="added",
+                ))
+            else:
+                freq = adj.frequency or "monthly"
+                if normalized:
+                    interval = FREQUENCY_MONTHS.get(freq, 1)
+                    amount = round(adj.amount_cents / interval)
+                else:
+                    if not _cadence_hits(freq, adj.anchor_month, mon):
+                        continue
+                    amount = adj.amount_cents
+                rows.append(_row(
+                    "recurring", -adj.id, adj.name, amount, adj.direction,
+                    frequency=freq, day=None, category=_cat(cat), person=_person(per),
+                    effect="added",
+                ))
     return rows
 
 
@@ -229,11 +272,15 @@ def compute_month(
     year, mon, start, end = _month_parts(month)
     filters = (person_id, joint_only, category_ids)
 
+    # actual = true cash flow this month (recurrings that land + one-offs).
     actual = _recurring_rows(db, month, mon, filters, normalized=False) + _txn_rows(
         db, start, end, filters
     )
-    normalized = _recurring_rows(db, month, mon, filters, normalized=True) + _txn_rows(
-        db, start, end, filters
+    # normalized = provisioning: lumpy recurrings smoothed + sinking-fund
+    # set-asides. One-offs are deliberately excluded - an unprovisioned
+    # surprise belongs in cash flow, not the "typical month" figure.
+    normalized = _recurring_rows(db, month, mon, filters, normalized=True) + _fund_rows(
+        db, filters
     )
 
     side = _side(actual, normalized)
@@ -248,16 +295,19 @@ def compute_month(
                 db, normalized, adjustments, mon, filters, normalized=True
             )
             s_side = _side(s_actual, s_normalized)
-            base_t = side.totals
-            scen_t = s_side.totals
+
+            def _delta(scen: MonthTotals, base: MonthTotals) -> MonthTotals:
+                return MonthTotals(
+                    in_cents=scen.in_cents - base.in_cents,
+                    out_cents=scen.out_cents - base.out_cents,
+                    net_cents=scen.net_cents - base.net_cents,
+                )
+
             result.scenario = ScenarioMonthResult(
                 id=scenario.id,
                 name=scenario.name,
-                delta=MonthTotals(
-                    in_cents=scen_t.in_cents - base_t.in_cents,
-                    out_cents=scen_t.out_cents - base_t.out_cents,
-                    net_cents=scen_t.net_cents - base_t.net_cents,
-                ),
+                delta=_delta(s_side.totals, side.totals),
+                normalized_delta=_delta(s_side.normalized, side.normalized),
                 **s_side.model_dump(),
             )
 

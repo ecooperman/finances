@@ -148,7 +148,7 @@ function fillSelect(select, options, { blankLabel } = {}) {
   if (prev && [...select.options].some((o) => o.value === prev)) select.value = prev;
 }
 
-// Standard "Evan / Spouse / Joint" person <select>. Value "" = everyone,
+// Standard "Evan / Rach / Joint" person <select>. Value "" = everyone,
 // "joint" = untagged only, otherwise a numeric person id.
 function fillPersonFilter(select, people) {
   fillSelect(
@@ -158,19 +158,32 @@ function fillPersonFilter(select, people) {
   );
 }
 
-// --- entry forms (recurring items + one-time transactions) --------------
+// --- entry forms (transaction / recurring item / sinking fund) ---------
 //
-// A recurring item and a one-off transaction are different shapes in the
-// DB, but you add them from one place: the "+ Add" form below has a
-// "Repeats" toggle that swaps the schedule fields in for the date field
-// and decides which endpoint the submit hits. Used by the Budget page and
-// the Overview quick-add. Edit forms stay type-specific (see budget.js).
+// One "+ Add" form covers all three. A 3-way toggle at the top switches
+// which fields show and which endpoint the submit hits. Different DB
+// shapes, one entry point. Used by the Budget page and the Overview
+// quick-add. Edit forms stay type-specific (see budget.js).
 
 const MONTH_OPTIONS = MONTH_NAMES.map((n, i) => ({ value: i + 1, label: n }));
 const _opt = (v, label, cur) =>
   `<option value="${v}"${String(cur) === String(v) ? " selected" : ""}>${label}</option>`;
 const escAttr = (s) => (s == null ? "" : String(s).replace(/"/g, "&quot;"));
 const escText = (s) => (s == null ? "" : String(s).replace(/</g, "&lt;"));
+
+// A sinking fund's yearly rate from however the user expressed it.
+function fundAnnualCents(amountCents, unit, n) {
+  if (amountCents == null) return null;
+  n = Number(n) || 0;
+  switch (unit) {
+    case "year": return amountCents;
+    case "month": return amountCents * 12;
+    case "weeks": return n > 0 ? Math.round((amountCents * 52) / n) : null;
+    case "months": return n > 0 ? Math.round((amountCents * 12) / n) : null;
+    case "times_year": return n > 0 ? amountCents * n : null;
+    default: return amountCents;
+  }
+}
 
 function recurringScheduleBlockHTML(it) {
   it = it || {};
@@ -216,6 +229,41 @@ function onetimeBlockHTML(t) {
           <label>Account (optional)</label>
           <input name="account_name" type="text" value="${escAttr(t.account_name)}" placeholder="e.g. Chase checking" />
         </div>
+        <div class="field">
+          <label>Draw from fund (optional)</label>
+          <select name="fund_id"></select>
+        </div>
+      </div>
+    </div>`;
+}
+
+function fundBlockHTML() {
+  return `
+    <div class="fin-fund-block hidden">
+      <div class="field-row">
+        <div class="field">
+          <label>Amount ($) <span class="required">*</span></label>
+          <input name="fund_amount" type="text" inputmode="decimal" placeholder="85.00" />
+        </div>
+        <div class="field">
+          <label>How often</label>
+          <select name="fund_unit">
+            ${_opt("year", "per year", "year")}
+            ${_opt("month", "per month", "year")}
+            ${_opt("weeks", "every N weeks", "year")}
+            ${_opt("months", "every N months", "year")}
+            ${_opt("times_year", "N times per year", "year")}
+          </select>
+        </div>
+        <div class="field fin-fund-n-field hidden">
+          <label>N</label>
+          <input name="fund_period_n" type="number" min="1" placeholder="7" />
+        </div>
+      </div>
+      <p class="fin-fund-preview">≈ <strong data-role="fund-preview">$0.00</strong> / month set aside</p>
+      <div class="field">
+        <label>Accrual starts (optional)</label>
+        <input name="fund_start_month" type="month" />
       </div>
     </div>`;
 }
@@ -223,23 +271,30 @@ function onetimeBlockHTML(t) {
 // The combined add form body (no <form> wrapper, no action buttons).
 function entryAddFieldsHTML() {
   return `
-    <label class="checkbox-label"><input name="repeats" type="checkbox" /> Repeats on a schedule</label>
+    <div class="fin-segmented fin-entry-type" role="tablist">
+      <button type="button" data-etype="transaction" class="active">One-time</button>
+      <button type="button" data-etype="recurring">Recurring</button>
+      <button type="button" data-etype="fund">Fund</button>
+    </div>
     <div class="field">
       <label><span data-role="name-text">Description</span> <span class="required">*</span></label>
       <input name="name" type="text" required placeholder="e.g. New water heater" />
     </div>
-    <div class="field-row">
-      <div class="field">
-        <label>Amount ($) <span class="required">*</span></label>
-        <input name="amount" type="text" inputmode="decimal" required placeholder="1200.00" />
+    <div class="fin-move-block">
+      <div class="field-row">
+        <div class="field">
+          <label>Amount ($) <span class="required">*</span></label>
+          <input name="amount" type="text" inputmode="decimal" placeholder="1200.00" />
+        </div>
+        <div class="field">
+          <label>Direction</label>
+          <select name="direction">${_opt("out", "Money out", "out")}${_opt("in", "Money in", "out")}</select>
+        </div>
       </div>
-      <div class="field">
-        <label>Direction</label>
-        <select name="direction">${_opt("out", "Money out", "out")}${_opt("in", "Money in", "out")}</select>
-      </div>
+      ${onetimeBlockHTML(null)}
+      ${recurringScheduleBlockHTML(null)}
     </div>
-    ${onetimeBlockHTML(null)}
-    ${recurringScheduleBlockHTML(null)}
+    ${fundBlockHTML()}
     <div class="field-row">
       <div class="field"><label>Category</label><select name="category_id"></select></div>
       <div class="field"><label>Person</label><select name="person_id"></select></div>
@@ -247,51 +302,109 @@ function entryAddFieldsHTML() {
     <div class="field"><label>Notes</label><textarea name="notes" rows="2" placeholder="Optional"></textarea></div>`;
 }
 
-// Populate selects and wire the Repeats + frequency toggles on a combined
-// add form. `scope` is the <form> (or any wrapping element).
-function wireEntryForm(scope, people, categories) {
+// Current entry type is read straight off the DOM (the active seg button),
+// so readEntryForm doesn't need shared state with wireEntryForm.
+function _entryType(scope) {
+  const active = scope.querySelector(".fin-entry-type button.active");
+  return active ? active.dataset.etype : "transaction";
+}
+
+function wireEntryForm(scope, people, categories, funds = []) {
   fillSelect(scope.querySelector('[name="category_id"]'), categories.map((c) => ({ value: c.id, label: c.name })), { blankLabel: "— none —" });
   fillSelect(scope.querySelector('[name="person_id"]'), people.map((p) => ({ value: p.id, label: p.name })), { blankLabel: "Joint" });
+  const fundSel = scope.querySelector('[name="fund_id"]');
+  if (fundSel) fillSelect(fundSel, funds.map((f) => ({ value: f.id, label: f.name })), { blankLabel: "— none —" });
 
-  const repeats = scope.querySelector('[name="repeats"]');
-  const recBlock = scope.querySelector(".fin-recurring-block");
+  const segBtns = [...scope.querySelectorAll(".fin-entry-type button")];
+  const moveBlock = scope.querySelector(".fin-move-block");
   const oneBlock = scope.querySelector(".fin-onetime-block");
+  const recBlock = scope.querySelector(".fin-recurring-block");
+  const fundBlock = scope.querySelector(".fin-fund-block");
   const nameText = scope.querySelector('[data-role="name-text"]');
   const freq = scope.querySelector('[name="frequency"]');
   const anchorField = scope.querySelector(".fin-anchor-field");
   const dateInput = scope.querySelector('[name="date"]');
+  const fundUnit = scope.querySelector('[name="fund_unit"]');
+  const fundNField = scope.querySelector(".fin-fund-n-field");
+  const fundAmount = scope.querySelector('[name="fund_amount"]');
+  const fundN = scope.querySelector('[name="fund_period_n"]');
+  const fundPreview = scope.querySelector('[data-role="fund-preview"]');
+
+  const refreshFundPreview = () => {
+    const annual = fundAnnualCents(dollarsToCents(fundAmount.value), fundUnit.value, fundN.value);
+    fundPreview.textContent = annual == null ? "$0.00" : fmtMoney(Math.round(annual / 12));
+  };
 
   const sync = () => {
-    const r = repeats.checked;
-    if (!r) freq.value = "monthly"; // don't carry a stale cadence into a one-off
-    recBlock.classList.toggle("hidden", !r);
-    oneBlock.classList.toggle("hidden", r);
-    nameText.textContent = r ? "Name" : "Description";
+    const t = _entryType(scope);
+    moveBlock.classList.toggle("hidden", t === "fund");
+    fundBlock.classList.toggle("hidden", t !== "fund");
+    oneBlock.classList.toggle("hidden", t !== "transaction");
+    recBlock.classList.toggle("hidden", t !== "recurring");
+    nameText.textContent = t === "transaction" ? "Description" : "Name";
+    if (t !== "recurring") freq.value = "monthly";
     anchorField.classList.toggle("hidden", freq.value === "monthly");
-    if (dateInput) dateInput.required = !r;
+    if (dateInput) dateInput.required = t === "transaction";
+    fundNField.classList.toggle("hidden", !["weeks", "months", "times_year"].includes(fundUnit.value));
+    refreshFundPreview();
   };
-  repeats.addEventListener("change", sync);
+
+  segBtns.forEach((b) =>
+    b.addEventListener("click", () => {
+      segBtns.forEach((x) => x.classList.toggle("active", x === b));
+      sync();
+    })
+  );
   freq.addEventListener("change", sync);
+  fundUnit.addEventListener("change", sync);
+  fundAmount.addEventListener("input", refreshFundPreview);
+  fundN.addEventListener("input", refreshFundPreview);
   sync();
 }
 
 // Read a combined add form into { type, body } ready to POST.
 function readEntryForm(scope) {
   const g = (n) => scope.querySelector(`[name="${n}"]`);
-  const base = {
-    amount_cents: dollarsToCents(g("amount").value),
-    direction: g("direction").value,
+  const t = _entryType(scope);
+  const shared = {
+    name: g("name").value.trim(),
     category_id: g("category_id").value || null,
     person_id: g("person_id").value || null,
     notes: g("notes").value.trim() || null,
   };
-  if (g("repeats").checked) {
+
+  if (t === "fund") {
+    const unit = g("fund_unit").value;
+    const n = g("fund_period_n").value ? Number(g("fund_period_n").value) : null;
+    const entry_amount_cents = dollarsToCents(g("fund_amount").value);
+    return {
+      type: "fund",
+      body: {
+        name: shared.name,
+        annual_amount_cents: fundAnnualCents(entry_amount_cents, unit, n),
+        entry_amount_cents,
+        entry_unit: unit,
+        entry_period_n: n,
+        category_id: shared.category_id,
+        person_id: shared.person_id,
+        start_month: g("fund_start_month").value || null,
+        active: true,
+        notes: shared.notes,
+      },
+    };
+  }
+
+  const base = {
+    ...shared,
+    amount_cents: dollarsToCents(g("amount").value),
+    direction: g("direction").value,
+  };
+  if (t === "recurring") {
     const monthly = g("frequency").value === "monthly";
     return {
       type: "recurring",
       body: {
         ...base,
-        name: g("name").value.trim(),
         frequency: g("frequency").value,
         anchor_month: monthly ? null : Number(g("anchor_month").value),
         day_of_month: g("day_of_month").value ? Number(g("day_of_month").value) : null,
@@ -301,27 +414,40 @@ function readEntryForm(scope) {
       },
     };
   }
+  const { name, ...txnBase } = base;
   return {
     type: "transaction",
     body: {
-      ...base,
-      description: g("name").value.trim(),
+      ...txnBase,
+      description: name,
       date: g("date").value,
       account_name: g("account_name").value.trim() || null,
+      fund_id: g("fund_id") && g("fund_id").value ? Number(g("fund_id").value) : null,
     },
   };
 }
 
 function entryValidationError({ type, body }) {
-  if (type === "recurring" && !body.name) return "Name is required.";
-  if (type === "transaction" && !body.description) return "Description is required.";
+  if (!body.name && !body.description) return "Name is required.";
   if (type === "transaction" && !body.date) return "Date is required.";
-  if (body.amount_cents == null || body.amount_cents <= 0) return "Enter a dollar amount greater than zero.";
+  if (type === "fund") {
+    if (body.annual_amount_cents == null || body.annual_amount_cents <= 0)
+      return "Enter a positive amount (and an N for 'every N ...').";
+    return null;
+  }
+  if (body.amount_cents == null || body.amount_cents <= 0)
+    return "Enter a dollar amount greater than zero.";
   return null;
 }
 
+const ENTRY_ADDED_MESSAGE = {
+  transaction: "Transaction added.",
+  recurring: "Recurring item added.",
+  fund: "Fund created.",
+};
+
 async function submitEntry({ type, body }) {
-  const path = type === "recurring" ? "recurring" : "transactions";
+  const path = { transaction: "transactions", recurring: "recurring", fund: "funds" }[type];
   return fetchJSON(`${API}/${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

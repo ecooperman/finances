@@ -1,8 +1,8 @@
-// Scenarios - saved "what-if" bundles. Each scenario holds a list of
-// adjustments (add a hypothetical line / remove an existing recurring item
-// / scale or override one). The Overview page overlays a scenario and shows
-// its net next to the real net. Adjustments are add + delete here; editing
-// one = delete and re-add.
+// Scenarios - saved "what-if" bundles. Each adjustment adds a hypothetical
+// recurring line or sinking fund, or removes / scales an existing one.
+// Recurring/one-off adjustments move the Overview's cash-flow net; fund
+// adjustments move its provisioned net. Adjustments are add + delete here;
+// editing one = delete and re-add.
 
 const listEl = document.getElementById("list");
 const emptyEl = document.getElementById("empty");
@@ -12,11 +12,16 @@ const addForm = document.getElementById("add-form");
 let PEOPLE = [];
 let CATEGORIES = [];
 let RECURRING = [];
+let FUNDS = [];
 
 // MONTH_OPTIONS comes from common.js (loaded first).
 const recurringName = (id) => {
   const r = RECURRING.find((x) => x.id === id);
   return r ? r.name : `item #${id}`;
+};
+const fundName = (id) => {
+  const f = FUNDS.find((x) => x.id === id);
+  return f ? f.name : `fund #${id}`;
 };
 
 // --- add scenario ---------------------------------------------------
@@ -51,16 +56,16 @@ addForm.addEventListener("submit", async (e) => {
 // --- adjustment description --------------------------------------
 
 function describeAdjustment(a) {
+  const targetName = a.target_fund_id != null ? `${fundName(a.target_fund_id)} (fund)` : recurringName(a.target_recurring_id);
   if (a.kind === "add") {
+    if (a.add_kind === "fund") return `Add fund "${a.name}" — ${fmtMoney(a.amount_cents)}/yr set aside`;
     const bits = [freqLabel(a.frequency || "monthly").toLowerCase(), a.direction === "in" ? "in" : "out"];
     return `Add "${a.name}" — ${fmtMoney(a.amount_cents)} ${bits.join(" ")}`;
   }
-  if (a.kind === "remove") return `Remove "${recurringName(a.target_recurring_id)}"`;
+  if (a.kind === "remove") return `Remove "${targetName}"`;
   if (a.kind === "modify") {
-    if (a.override_amount_cents != null) {
-      return `Set "${recurringName(a.target_recurring_id)}" to ${fmtMoney(a.override_amount_cents)}`;
-    }
-    return `Scale "${recurringName(a.target_recurring_id)}" ×${a.multiplier}`;
+    if (a.override_amount_cents != null) return `Set "${targetName}" to ${fmtMoney(a.override_amount_cents)}`;
+    return `Scale "${targetName}" ×${a.multiplier}`;
   }
   return a.kind;
 }
@@ -80,21 +85,27 @@ function adjustmentFormHTML() {
     </div>
 
     <div class="fin-adj-group" data-group="add">
-      <div class="field">
-        <label>Name</label>
-        <input name="name" type="text" placeholder="e.g. Car payment" />
+      <div class="field-row">
+        <div class="field">
+          <label>Add a</label>
+          <select name="add_kind">${opt("recurring", "Recurring line")}${opt("fund", "Sinking fund")}</select>
+        </div>
+        <div class="field">
+          <label>Name</label>
+          <input name="name" type="text" placeholder="e.g. Car payment" />
+        </div>
       </div>
       <div class="field-row">
         <div class="field">
-          <label>Amount ($)</label>
+          <label data-label="add_amount">Amount ($)</label>
           <input name="amount" type="text" inputmode="decimal" placeholder="450.00" />
         </div>
-        <div class="field">
+        <div class="field fin-adj-recurring-only">
           <label>Direction</label>
           <select name="direction">${opt("out", "Money out")}${opt("in", "Money in")}</select>
         </div>
       </div>
-      <div class="field-row">
+      <div class="field-row fin-adj-recurring-only">
         <div class="field">
           <label>Frequency</label>
           <select name="frequency">
@@ -120,8 +131,8 @@ function adjustmentFormHTML() {
 
     <div class="fin-adj-group hidden" data-group="target">
       <div class="field">
-        <label>Which recurring item</label>
-        <select name="target_recurring_id"></select>
+        <label>Which item or fund</label>
+        <select name="target"></select>
       </div>
     </div>
 
@@ -146,8 +157,11 @@ function adjustmentFormHTML() {
 
 function wireAdjustmentForm(form, scenarioId) {
   const kind = form.querySelector('[name="kind"]');
+  const addKind = form.querySelector('[name="add_kind"]');
   const freq = form.querySelector('[name="frequency"]');
   const anchorField = form.querySelector(".fin-anchor-field");
+  const addAmountLabel = form.querySelector('[data-label="add_amount"]');
+  const recurringOnly = form.querySelectorAll(".fin-adj-recurring-only");
   const modifyMode = form.querySelector('[name="modify_mode"]');
   const modifyLabel = form.querySelector('[data-label="modify_value"]');
   const groups = form.querySelectorAll(".fin-adj-group");
@@ -155,8 +169,11 @@ function wireAdjustmentForm(form, scenarioId) {
   fillSelect(form.querySelector('[name="category_id"]'), CATEGORIES.map((c) => ({ value: c.id, label: c.name })), { blankLabel: "— none —" });
   fillSelect(form.querySelector('[name="person_id"]'), PEOPLE.map((p) => ({ value: p.id, label: p.name })), { blankLabel: "Joint" });
   fillSelect(
-    form.querySelector('[name="target_recurring_id"]'),
-    RECURRING.map((r) => ({ value: r.id, label: `${r.name} (${fmtMoney(r.amount_cents)} ${r.direction})` })),
+    form.querySelector('[name="target"]'),
+    [
+      ...RECURRING.map((r) => ({ value: `r:${r.id}`, label: `${r.name} (${fmtMoney(r.amount_cents)} ${r.direction})` })),
+      ...FUNDS.map((f) => ({ value: `f:${f.id}`, label: `${f.name} — fund` })),
+    ],
     { blankLabel: "— pick one —" }
   );
 
@@ -167,10 +184,14 @@ function wireAdjustmentForm(form, scenarioId) {
       const show = (k === "add" && name === "add") || ((k === "remove" || k === "modify") && name === "target") || (k === "modify" && name === "modify");
       g.classList.toggle("hidden", !show);
     });
-    anchorField.classList.toggle("hidden", freq.value === "monthly");
+    const isFund = addKind.value === "fund";
+    recurringOnly.forEach((n) => n.classList.toggle("hidden", isFund));
+    addAmountLabel.textContent = isFund ? "Amount ($) per year" : "Amount ($)";
+    anchorField.classList.toggle("hidden", isFund || freq.value === "monthly");
     modifyLabel.textContent = modifyMode.value === "multiplier" ? "Factor (e.g. 0.5)" : "Amount ($)";
   };
   kind.addEventListener("change", sync);
+  addKind.addEventListener("change", sync);
   freq.addEventListener("change", sync);
   modifyMode.addEventListener("change", sync);
   sync();
@@ -181,23 +202,28 @@ function wireAdjustmentForm(form, scenarioId) {
     const k = g("kind").value;
     let body = { kind: k };
     if (k === "add") {
+      const isFund = g("add_kind").value === "fund";
       body = {
         kind: "add",
+        add_kind: isFund ? "fund" : "recurring",
         name: g("name").value.trim(),
         amount_cents: dollarsToCents(g("amount").value),
-        direction: g("direction").value,
-        frequency: g("frequency").value,
-        anchor_month: g("frequency").value === "monthly" ? null : Number(g("anchor_month").value),
         category_id: g("category_id").value || null,
         person_id: g("person_id").value || null,
       };
+      if (!isFund) {
+        body.direction = g("direction").value;
+        body.frequency = g("frequency").value;
+        body.anchor_month = g("frequency").value === "monthly" ? null : Number(g("anchor_month").value);
+      }
       if (!body.name || body.amount_cents == null || body.amount_cents <= 0) {
         return Global.showMessage("A new line needs a name and a positive amount.", "error");
       }
     } else {
-      const target = Number(g("target_recurring_id").value);
-      if (!target) return Global.showMessage("Pick a recurring item.", "error");
-      body.target_recurring_id = target;
+      const raw = g("target").value;
+      if (!raw) return Global.showMessage("Pick an item or fund.", "error");
+      const [prefix, id] = raw.split(":");
+      body[prefix === "f" ? "target_fund_id" : "target_recurring_id"] = Number(id);
       if (k === "modify") {
         if (g("modify_mode").value === "multiplier") {
           const mult = Number(g("modify_value").value);
@@ -340,11 +366,13 @@ function card(scenario) {
 
 async function load() {
   try {
-    const [scenarios, recurring] = await Promise.all([
+    const [scenarios, recurring, funds] = await Promise.all([
       fetchJSON(`${API}/scenarios`),
       fetchJSON(`${API}/recurring`),
+      fetchJSON(`${API}/funds`),
     ]);
     RECURRING = recurring;
+    FUNDS = funds;
     listEl.innerHTML = "";
     scenarios.forEach((s) => listEl.appendChild(card(s)));
     emptyEl.classList.toggle("hidden", scenarios.length > 0);
