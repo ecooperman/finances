@@ -5,9 +5,18 @@ from sqlalchemy.orm import Session
 
 from .. import crud, schemas
 from ..deps import get_db
-from ..models import FREQUENCY_MONTHS
+from ..models import FREQUENCY_PER_MONTH
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
+
+
+def _reject_duplicate_reference_id(db: Session, reference_id, exclude_id=None):
+    conflict = crud.recurring_reference_id_conflict(db, reference_id, exclude_id)
+    if conflict is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f'Reference ID "{reference_id}" is already on "{conflict.name}".',
+        )
 
 
 @router.get("", response_model=List[schemas.RecurringItem])
@@ -23,12 +32,11 @@ def list_recurring(
 @router.get("/summary")
 def recurring_summary(db: Session = Depends(get_db)):
     """The known monthly baseline: totals of all active recurring items,
-    with lumpy (non-monthly) items smoothed to a per-month figure."""
+    every cadence smoothed to a per-month figure."""
     items = crud.get_recurring_items(db, active=True)
     in_cents = out_cents = 0
     for item in items:
-        interval = FREQUENCY_MONTHS.get(item.frequency, 1)
-        per_month = round(item.amount_cents / interval)
+        per_month = round(item.amount_cents * FREQUENCY_PER_MONTH.get(item.frequency, 1.0))
         if item.direction == "in":
             in_cents += per_month
         else:
@@ -43,6 +51,7 @@ def recurring_summary(db: Session = Depends(get_db)):
 
 @router.post("", response_model=schemas.RecurringItem)
 def create_recurring(item: schemas.RecurringItemCreate, db: Session = Depends(get_db)):
+    _reject_duplicate_reference_id(db, item.reference_id)
     return crud.create_recurring_item(db, item)
 
 
@@ -50,6 +59,7 @@ def create_recurring(item: schemas.RecurringItemCreate, db: Session = Depends(ge
 def update_recurring(
     item_id: int, updates: schemas.RecurringItemUpdate, db: Session = Depends(get_db)
 ):
+    _reject_duplicate_reference_id(db, updates.reference_id, exclude_id=item_id)
     item = crud.update_recurring_item(db, item_id, updates)
     if item is None:
         raise HTTPException(status_code=404, detail="Recurring item not found")

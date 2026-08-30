@@ -65,6 +65,93 @@ function renderList(container, rows) {
   if (typeof applyIcons === "function") applyIcons(container);
 }
 
+// --- payment calendar (top of the page, built from the same month data) ---
+
+const CAL_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const CAL_ENTRY_CAP = 4;
+
+function calEntry(r) {
+  const effect = r.effect && r.effect !== "normal" ? " fin-cal-e-" + r.effect : "";
+  return el("div", {
+    class: "fin-cal-entry fin-cal-amt-" + r.direction + effect,
+    title: `${r.name} · ${fmtMoney(r.amount_cents)}` + (effect ? ` (${r.effect})` : ""),
+    text: r.name,
+  });
+}
+
+function renderCalendar(month, rows) {
+  const cal = document.getElementById("calendar");
+  const noDayEl = document.getElementById("cal-noday");
+  cal.innerHTML = "";
+
+  const byDay = new Map();
+  const noDay = [];
+  for (const r of rows) {
+    if (r.day == null) {
+      noDay.push(r);
+      continue;
+    }
+    if (!byDay.has(r.day)) byDay.set(r.day, []);
+    byDay.get(r.day).push(r);
+  }
+
+  const head = el("div", { class: "fin-cal-head" });
+  for (const w of CAL_WEEKDAYS) head.appendChild(el("div", { class: "fin-cal-hcell", text: w }));
+  cal.appendChild(head);
+
+  const [y, m] = month.split("-").map(Number);
+  const startDow = new Date(y, m - 1, 1).getDay();
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const cellCount = Math.ceil((startDow + daysInMonth) / 7) * 7;
+  const todayDay = month === thisMonth() ? new Date().getDate() : -1;
+
+  const grid = el("div", { class: "fin-cal-grid" });
+  for (let i = 0; i < cellCount; i++) {
+    const dayNum = i - startDow + 1;
+    const inMonth = dayNum >= 1 && dayNum <= daysInMonth;
+    const cell = el("div", {
+      class:
+        "fin-cal-cell" +
+        (inMonth ? "" : " fin-cal-out") +
+        (dayNum === todayDay ? " fin-cal-today" : ""),
+    });
+    if (inMonth) {
+      cell.appendChild(el("div", { class: "fin-cal-date", text: String(dayNum) }));
+      const entries = byDay.get(dayNum) || [];
+      for (const r of entries.slice(0, CAL_ENTRY_CAP)) cell.appendChild(calEntry(r));
+      if (entries.length > CAL_ENTRY_CAP) {
+        cell.appendChild(el("div", {
+          class: "fin-cal-more",
+          text: `+${entries.length - CAL_ENTRY_CAP} more`,
+          title: entries
+            .slice(CAL_ENTRY_CAP)
+            .map((r) => `${r.name} · ${fmtMoney(r.amount_cents)}`)
+            .join("\n"),
+        }));
+      }
+      if (entries.length) {
+        const net = entries.reduce(
+          (s, r) => s + (r.direction === "in" ? r.amount_cents : -r.amount_cents),
+          0
+        );
+        cell.appendChild(el("div", {
+          class: "fin-cal-net " + (net < 0 ? "fin-net-neg" : "fin-net-pos"),
+          text: fmtSignedMoney(net),
+        }));
+      }
+    }
+    grid.appendChild(cell);
+  }
+  cal.appendChild(grid);
+
+  if (noDay.length) {
+    noDayEl.classList.remove("hidden");
+    noDayEl.textContent = "No set day: " + noDay.map((r) => r.name).join(", ");
+  } else {
+    noDayEl.classList.add("hidden");
+  }
+}
+
 function totalsBlock(title, totals, { muted } = {}) {
   return el("div", { class: "fin-total-group" + (muted ? " fin-total-muted" : "") }, [
     el("div", { class: "fin-total-title", text: title }),
@@ -91,18 +178,17 @@ function renderTotals(data) {
   totalsEl.appendChild(totalsBlock("This month (cash flow)", data.totals));
   totalsEl.appendChild(
     el("p", { class: "fin-normalized" }, [
-      "Provisioned — recurring smoothed + funds set aside: ",
+      "Provisioned — recurring smoothed + funds + trips: ",
       el("strong", { text: fmtSignedMoney(data.normalized.net_cents) }),
     ])
   );
   if (FUNDS_STATUS) {
     const f = FUNDS_STATUS;
-    totalsEl.appendChild(
-      el("p", { class: "fin-normalized" }, [
-        `Funds: ${f.active_count} active · ${fmtMoney(f.monthly_total_cents)}/mo set aside · `,
-        el("strong", { text: `${fmtMoney(f.banked_total_cents)} banked` }),
-      ])
-    );
+    let text = `Funds: ${f.active_count} active · ${fmtMoney(f.monthly_total_cents)}/mo set aside · ${fmtMoney(f.banked_total_cents)} banked`;
+    if (TRIPS_STATUS && TRIPS_STATUS.upcoming_count) {
+      text += `  ·  Trips: ${TRIPS_STATUS.upcoming_count} upcoming, ${fmtMoney(TRIPS_STATUS.monthly_total_cents)}/mo`;
+    }
+    totalsEl.appendChild(el("p", { class: "fin-normalized", text }));
   }
 
   if (data.scenario) {
@@ -134,17 +220,21 @@ function buildQuery() {
 }
 
 let FUNDS_STATUS = null;
+let TRIPS_STATUS = null;
 
 async function render() {
   monthLabelEl.textContent = monthLabel(state.month);
   try {
-    const [data, fundsSummary] = await Promise.all([
+    const [data, fundsSummary, tripsSummary] = await Promise.all([
       fetchJSON(`${API}/monthly?${buildQuery()}`),
       fetchJSON(`${API}/funds/summary?month=${state.month}`).catch(() => null),
+      fetchJSON(`${API}/trips/summary?month=${state.month}`).catch(() => null),
     ]);
     FUNDS_STATUS = fundsSummary;
+    TRIPS_STATUS = tripsSummary;
     const inRows = data.scenario ? data.scenario.money_in : data.money_in;
     const outRows = data.scenario ? data.scenario.money_out : data.money_out;
+    renderCalendar(state.month, [...inRows, ...outRows]);
     renderList(inList, inRows);
     renderList(outList, outRows);
     inCount.textContent = `${inRows.length} item${inRows.length === 1 ? "" : "s"}`;

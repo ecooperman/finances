@@ -127,6 +127,45 @@
   margin: 0 0 12px;
 }
 
+/* --- trip forecast cards --- */
+
+.fin-trip-card {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fin-trip-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.fin-trip-detail {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.fin-trip-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.fin-trip-actions button {
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.fin-trip-override {
+  width: 150px;
+  flex: none;
+}
+
 /* --- filter row --- */
 
 .fin-filters {
@@ -493,4 +532,131 @@
   font-size: 12px;
   color: var(--muted);
   margin: 8px 2px 0;
+}
+
+/* --- payment calendar (Overview, top) --- */
+
+.fin-cal-section {
+  margin-bottom: 20px;
+}
+
+.fin-cal-head,
+.fin-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.fin-cal-head {
+  margin-bottom: 4px;
+}
+
+.fin-cal-hcell {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.fin-cal-cell {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-height: 78px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.fin-cal-cell.fin-cal-out {
+  background: var(--muted-bg);
+  border-color: transparent;
+}
+
+.fin-cal-cell.fin-cal-today {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.fin-cal-date {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.fin-cal-cell.fin-cal-today .fin-cal-date {
+  color: var(--accent);
+}
+
+.fin-cal-entry {
+  font-size: 10px;
+  line-height: 1.35;
+  padding: 1px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fin-cal-amt-in {
+  background: var(--in-bg);
+  color: var(--in);
+}
+
+.fin-cal-amt-out {
+  background: var(--out-bg);
+  color: var(--out);
+}
+
+.fin-cal-e-added {
+  outline: 1px solid var(--in);
+}
+
+.fin-cal-e-removed {
+  opacity: 0.45;
+  text-decoration: line-through;
+}
+
+.fin-cal-e-modified {
+  outline: 1px solid var(--warning);
+}
+
+.fin-cal-more {
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.fin-cal-net {
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-cal-noday {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 8px 2px 0;
+}
+
+@media (max-width: 560px) {
+  .fin-cal-head,
+  .fin-cal-grid {
+    gap: 2px;
+  }
+  .fin-cal-cell {
+    min-height: 56px;
+    padding: 2px;
+  }
+  .fin-cal-entry {
+    font-size: 9px;
+    padding: 0 2px;
+  }
+  .fin-cal-net {
+    font-size: 9px;
+  }
 }

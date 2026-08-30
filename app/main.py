@@ -7,7 +7,16 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .config import SHARED_ASSETS_BASE
-from .routers import categories, funds, monthly, people, recurring, scenarios, transactions
+from .routers import (
+    categories,
+    funds,
+    monthly,
+    people,
+    recurring,
+    scenarios,
+    transactions,
+    trips,
+)
 
 # Schema is owned by Alembic migrations (see migrations/) - run
 # `alembic upgrade head` before starting the app rather than relying on
@@ -83,6 +92,7 @@ app.include_router(categories.router)
 app.include_router(recurring.router)
 app.include_router(transactions.router)
 app.include_router(funds.router)
+app.include_router(trips.router)
 app.include_router(scenarios.router)
 app.include_router(monthly.router)
 

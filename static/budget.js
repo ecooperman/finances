@@ -27,6 +27,9 @@ const onetimeSub = document.getElementById("onetime-sub");
 const fundsList = document.getElementById("funds-list");
 const fundsEmpty = document.getElementById("funds-empty");
 const fundsCount = document.getElementById("funds-count");
+const tripsList = document.getElementById("trips-list");
+const tripsEmpty = document.getElementById("trips-empty");
+const tripsCount = document.getElementById("trips-count");
 const baselineEl = document.getElementById("baseline");
 
 const state = {
@@ -62,7 +65,7 @@ function wireAnchor(scope) {
   const freq = scope.querySelector('[name="frequency"]');
   const anchorField = scope.querySelector(".fin-anchor-field");
   if (!freq || !anchorField) return;
-  const sync = () => anchorField.classList.toggle("hidden", freq.value === "monthly");
+  const sync = () => anchorField.classList.toggle("hidden", !isSubMonthlyFreq(freq.value));
   freq.addEventListener("change", sync);
   sync();
 }
@@ -143,18 +146,19 @@ function recurringEditHTML(it) {
 
 function readRecurring(scope) {
   const g = (n) => scope.querySelector(`[name="${n}"]`);
-  const monthly = g("frequency").value === "monthly";
+  const freq = g("frequency").value;
   return {
     name: g("name").value.trim(),
     amount_cents: dollarsToCents(g("amount").value),
     direction: g("direction").value,
-    frequency: g("frequency").value,
-    anchor_month: monthly ? null : Number(g("anchor_month").value),
+    frequency: freq,
+    anchor_month: isSubMonthlyFreq(freq) ? Number(g("anchor_month").value) : null,
     day_of_month: g("day_of_month").value ? Number(g("day_of_month").value) : null,
     category_id: g("category_id").value || null,
     person_id: g("person_id").value || null,
     start_month: g("start_month").value || null,
     end_month: g("end_month").value || null,
+    reference_id: g("reference_id").value.trim() || null,
     active: g("active").checked,
     notes: g("notes").value.trim() || null,
   };
@@ -170,7 +174,11 @@ function recurringCard(item) {
     el("span", { class: "fin-item-amount fin-amount-" + item.direction, text: fmtMoney(item.amount_cents) }),
     el("span", { class: "item-chevron", "aria-hidden": "true", text: "▸" }),
   ]);
-  const meta = el("div", { class: "fin-card-meta" }, [categoryChip(item.category), personBadge(item.person)]);
+  const meta = el("div", { class: "fin-card-meta" }, [
+    categoryChip(item.category),
+    personBadge(item.person),
+    item.reference_id ? el("span", { class: "item-badge item-badge-muted", text: `Ref ${item.reference_id}` }) : null,
+  ]);
 
   const details = el("div", { class: "item-details hidden" });
   const inner = el("div", { class: "item-details-inner" });
@@ -518,11 +526,12 @@ function fundCard(fund) {
 
 async function renderBaseline() {
   try {
-    const [rec, funds] = await Promise.all([
+    const [rec, funds, trips] = await Promise.all([
       fetchJSON(`${API}/recurring/summary`),
       fetchJSON(`${API}/funds/summary`),
+      fetchJSON(`${API}/trips/summary?month=${state.month}`).catch(() => ({ monthly_total_cents: 0 })),
     ]);
-    const outTotal = rec.out_cents + funds.monthly_total_cents;
+    const outTotal = rec.out_cents + funds.monthly_total_cents + trips.monthly_total_cents;
     const net = rec.in_cents - outTotal;
     baselineEl.innerHTML = "";
     baselineEl.appendChild(
@@ -531,6 +540,7 @@ async function renderBaseline() {
         el("div", { class: "fin-total-row" }, [el("span", { text: "Money in" }), el("span", { class: "fin-amount-in", text: fmtMoney(rec.in_cents) })]),
         el("div", { class: "fin-total-row" }, [el("span", { text: "Recurring out (smoothed)" }), el("span", { class: "fin-amount-out", text: fmtMoney(rec.out_cents) })]),
         el("div", { class: "fin-total-row" }, [el("span", { text: "Funds set aside" }), el("span", { class: "fin-amount-out", text: fmtMoney(funds.monthly_total_cents) })]),
+        el("div", { class: "fin-total-row" }, [el("span", { text: "Trips (spread)" }), el("span", { class: "fin-amount-out", text: fmtMoney(trips.monthly_total_cents) })]),
         el("div", { class: "fin-total-row fin-total-net" }, [
           el("span", { text: "Net / month" }),
           el("span", { class: "fin-net " + (net < 0 ? "fin-net-neg" : "fin-net-pos"), text: fmtSignedMoney(net) }),
@@ -596,6 +606,122 @@ async function loadFunds() {
   fundsCount.textContent = `${funds.length} fund${funds.length === 1 ? "" : "s"}`;
 }
 
+// --- trip forecast cards ------------------------------------
+
+function tripCard(t, { excluded = false, noDate = false } = {}) {
+  const wrap = el("div", { class: "item-card fin-trip-card" + (excluded ? " archived" : "") });
+
+  const line1 = el("div", { class: "fin-trip-line" }, [
+    el("span", { class: "fin-item-name", text: t.name }),
+    noDate
+      ? el("span", { class: "fin-tag fin-tag-removed", text: "no date" })
+      : el("span", { class: "fin-cadence", text: monthLabel(t.trip_month) }),
+    excluded ? el("span", { class: "fin-tag fin-tag-removed", text: "excluded" }) : null,
+  ]);
+
+  let detail;
+  if (noDate) {
+    detail = "Set a start date in trip-planning to fold this into the monthly forecast.";
+  } else if (t.total_cents <= 0) {
+    detail = "No cost yet — add activity/stay costs in trip-planning, or set an override below.";
+  } else {
+    detail = `Total ${fmtMoney(t.total_cents)} · ${fmtMoney(t.monthly_contribution_cents)}/mo`
+      + (t.months_remaining ? ` for ${t.months_remaining} month${t.months_remaining === 1 ? "" : "s"}` : "");
+  }
+  const line2 = el("div", { class: "fin-trip-detail", text: detail });
+
+  // override input
+  const overrideInput = el("input", {
+    type: "text", inputmode: "decimal", class: "fin-trip-override",
+    placeholder: "override total ($)",
+    value: t.override_amount_cents != null ? centsToInputValue(t.override_amount_cents) : "",
+  });
+  const saveOverride = el("button", {
+    type: "button", class: "secondary-btn", text: "Set",
+    onclick: async () => {
+      const cents = dollarsToCents(overrideInput.value);
+      try {
+        await fetchJSON(`${API}/trips/${t.trip_id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ override_amount_cents: cents && cents > 0 ? cents : null }),
+        });
+        Global.showMessage("Trip override updated.", "success");
+        load();
+      } catch (err) {
+        Global.showMessage(err.message, "error");
+      }
+    },
+  });
+
+  const actions = el("div", { class: "fin-trip-actions" }, [
+    overrideInput,
+    saveOverride,
+    el("button", {
+      type: "button", class: "secondary-btn", text: excluded ? "Include" : "Exclude",
+      onclick: async () => {
+        try {
+          await fetchJSON(`${API}/trips/${t.trip_id}`, {
+            method: "PATCH", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ excluded: !excluded }),
+          });
+          load();
+        } catch (err) {
+          Global.showMessage(err.message, "error");
+        }
+      },
+    }),
+    !excluded && !noDate
+      ? el("button", {
+          type: "button", class: "save-btn", text: "Mark fully paid",
+          onclick: async () => {
+            const today = new Date().toISOString().slice(0, 10);
+            const amt = t.total_cents;
+            if (amt <= 0) return Global.showMessage("Set a cost or override first.", "error");
+            if (!confirm(`Record ${fmtMoney(amt)} spent on "${t.name}" as a one-time transaction dated ${today}, and drop it from the forecast?`)) return;
+            try {
+              await fetchJSON(`${API}/trips/${t.trip_id}/settle`, {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ date: today }),
+              });
+              Global.showMessage(`"${t.name}" marked paid.`, "success");
+              load();
+            } catch (err) {
+              Global.showMessage(err.message, "error");
+            }
+          },
+        })
+      : null,
+  ]);
+
+  wrap.append(line1, line2, actions);
+  return wrap;
+}
+
+async function loadTrips() {
+  let data;
+  try {
+    data = await fetchJSON(`${API}/trips?month=${state.month}`);
+  } catch (err) {
+    tripsList.innerHTML = "";
+    tripsEmpty.textContent = "Trips unavailable — is the trip-planning app running?";
+    tripsEmpty.classList.remove("hidden");
+    tripsCount.textContent = "";
+    return;
+  }
+  const rows = [
+    ...data.upcoming.map((t) => tripCard(t)),
+    ...data.no_date.map((t) => tripCard(t, { noDate: true })),
+    ...data.excluded.map((t) => tripCard(t, { excluded: true })),
+  ];
+  tripsList.innerHTML = "";
+  rows.forEach((r) => tripsList.appendChild(r));
+  const total = data.upcoming.length + data.no_date.length + data.excluded.length;
+  tripsEmpty.textContent = "No upcoming trips.";
+  tripsEmpty.classList.toggle("hidden", total > 0);
+  tripsCount.textContent = total ? `${data.upcoming.length} upcoming` : "";
+}
+
 async function load() {
   const showRec = state.view === "all" || state.view === "recurring";
   const showOne = state.view === "all" || state.view === "onetime";
@@ -606,7 +732,7 @@ async function load() {
   allTimeBtn.classList.toggle("hidden", !showOne);
 
   try {
-    const jobs = [renderBaseline(), loadFunds()];
+    const jobs = [renderBaseline(), loadFunds(), loadTrips()];
     if (showRec) jobs.push(loadRecurring());
     if (showOne) jobs.push(loadOnetime());
     await Promise.all(jobs);

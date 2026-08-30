@@ -19,8 +19,9 @@ from typing import Iterable, List, Optional
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..models import FREQUENCY_MONTHS
+from ..models import FREQUENCY_INTERVAL_MONTHS, FREQUENCY_PER_MONTH
 from .funds import monthly_contribution_cents
+from .trips import trip_forecasts
 from ..schemas import (
     Category,
     MonthResult,
@@ -40,13 +41,29 @@ def _month_parts(month: str):
 
 
 def _cadence_hits(frequency: str, anchor_month: Optional[int], mon: int) -> bool:
-    """Does a recurring item with this cadence land in calendar month `mon`?"""
-    interval = FREQUENCY_MONTHS.get(frequency, 1)
-    if interval == 1:
+    """Does a recurring item with this cadence land in calendar month `mon`?
+    Weekly/biweekly/monthly land every month; the sub-monthly ones only in
+    their anchor month(s)."""
+    interval = FREQUENCY_INTERVAL_MONTHS.get(frequency)
+    if interval is None:
         return True
-    if anchor_month is None:  # non-monthly item with no anchor - treat as not landing
+    if anchor_month is None:  # sub-monthly item with no anchor - treat as not landing
         return False
     return (mon - anchor_month) % interval == 0
+
+
+def _recurring_amount(frequency: str, face_cents: int, normalized: bool) -> int:
+    """The amount a recurring item contributes to one month.
+
+    - sub-monthly (quarterly/...): its full face amount on the month it
+      lands (normalized=False), or its face / interval every month
+      (normalized=True).
+    - weekly/biweekly/monthly: the per-month figure either way
+      (face * occurrences-per-month; == face for monthly).
+    """
+    if not normalized and frequency in FREQUENCY_INTERVAL_MONTHS:
+        return face_cents
+    return round(face_cents * FREQUENCY_PER_MONTH.get(frequency, 1.0))
 
 
 def _active_in_month(item: models.RecurringItem, month: str) -> bool:
@@ -98,10 +115,10 @@ def _person(obj):
 def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
     """Recurring contributions for the month.
 
-    normalized=False -> only items whose cadence actually lands this month,
-                        at face amount (true cash flow).
-    normalized=True  -> every active/in-bounds item, amount divided by its
-                        cadence interval (a smoothed per-month figure).
+    normalized=False -> only items whose cadence lands this month, at their
+                        month's contribution (true cash flow).
+    normalized=True  -> every active/in-bounds item, its smoothed per-month
+                        figure.
     """
     rows = []
     for item in db.query(models.RecurringItem).all():
@@ -109,13 +126,9 @@ def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
             continue
         if not _passes_filters(item.person_id, item.category_id, *filters):
             continue
-        if normalized:
-            interval = FREQUENCY_MONTHS.get(item.frequency, 1)
-            amount = round(item.amount_cents / interval)
-        else:
-            if not _cadence_hits(item.frequency, item.anchor_month, mon):
-                continue
-            amount = item.amount_cents
+        if not normalized and not _cadence_hits(item.frequency, item.anchor_month, mon):
+            continue
+        amount = _recurring_amount(item.frequency, item.amount_cents, normalized)
         rows.append(_row(
             "recurring", item.id, item.name, amount, item.direction,
             frequency=item.frequency, day=item.day_of_month,
@@ -149,6 +162,22 @@ def _fund_rows(db, filters) -> List[dict]:
         rows.append(_row(
             "fund", fund.id, fund.name, monthly_contribution_cents(fund), "out",
             category=_cat(fund.category), person=_person(fund.person),
+        ))
+    return rows
+
+
+def _trip_rows(db, month, filters) -> List[dict]:
+    """Provisioning-only rows: each upcoming trip's cost spread over the
+    months until it happens (cost read live from trip-planning). Household /
+    no category, so dropped by a person or category filter."""
+    if not _passes_filters(None, None, *filters):
+        return []
+    rows = []
+    for t in trip_forecasts(db, month)["upcoming"]:
+        if t["monthly_contribution_cents"] <= 0:
+            continue
+        rows.append(_row(
+            "trip", t["trip_id"], t["name"], t["monthly_contribution_cents"], "out",
         ))
     return rows
 
@@ -194,13 +223,12 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
                     # override is an annual amount; row holds the monthly set-aside
                     new_amount = round(adj.override_amount_cents / 12)
                 else:
-                    # `original` is already divided when normalized=True, so
-                    # divide the override the same way to stay comparable.
-                    interval = FREQUENCY_MONTHS.get(target.get("frequency") or "monthly", 1)
-                    new_amount = (
-                        round(adj.override_amount_cents / interval)
-                        if normalized
-                        else adj.override_amount_cents
+                    # the row holds this month's contribution, not the face
+                    # amount, so convert the override the same way.
+                    new_amount = _recurring_amount(
+                        target.get("frequency") or "monthly",
+                        adj.override_amount_cents,
+                        normalized,
                     )
             else:
                 new_amount = round(original * adj.multiplier)
@@ -220,13 +248,9 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
                 ))
             else:
                 freq = adj.frequency or "monthly"
-                if normalized:
-                    interval = FREQUENCY_MONTHS.get(freq, 1)
-                    amount = round(adj.amount_cents / interval)
-                else:
-                    if not _cadence_hits(freq, adj.anchor_month, mon):
-                        continue
-                    amount = adj.amount_cents
+                if not normalized and not _cadence_hits(freq, adj.anchor_month, mon):
+                    continue
+                amount = _recurring_amount(freq, adj.amount_cents, normalized)
                 rows.append(_row(
                     "recurring", -adj.id, adj.name, amount, adj.direction,
                     frequency=freq, day=None, category=_cat(cat), person=_person(per),
@@ -277,10 +301,13 @@ def compute_month(
         db, start, end, filters
     )
     # normalized = provisioning: lumpy recurrings smoothed + sinking-fund
-    # set-asides. One-offs are deliberately excluded - an unprovisioned
-    # surprise belongs in cash flow, not the "typical month" figure.
-    normalized = _recurring_rows(db, month, mon, filters, normalized=True) + _fund_rows(
-        db, filters
+    # set-asides + upcoming trips spread over the months until they happen.
+    # One-offs are deliberately excluded - an unprovisioned surprise belongs
+    # in cash flow, not the "typical month" figure.
+    normalized = (
+        _recurring_rows(db, month, mon, filters, normalized=True)
+        + _fund_rows(db, filters)
+        + _trip_rows(db, month, filters)
     )
 
     side = _side(actual, normalized)

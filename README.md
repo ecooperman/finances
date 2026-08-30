@@ -24,8 +24,8 @@ follow-up - see [`SYNC.md`](SYNC.md).
 
 | Page | What it does |
 |---|---|
-| `/` (Overview) | Month stepper + person/category/scenario filters; money-in / money-out lists with a cash-flow net, a **Provisioned** figure (recurring smoothed + funds), and a funds status line. Read-only rollup + a unified "+ Add". |
-| `/budget.html` | The one place to add and manage every money event. Segmented view (All / Recurring / One-time) over person/category/status/month filters; always-visible **Funds** section; accordion cards for edit. Footer shows the provisioning baseline. |
+| `/` (Overview) | Month stepper + person/category/scenario filters; a **payment calendar** (a one-month grid built from the same filtered data); money-in / money-out lists with a cash-flow net, a **Provisioned** figure (recurring smoothed + funds + trips), and a funds/trips status line. Read-only rollup + a unified "+ Add". |
+| `/budget.html` | The one place to add and manage every money event. Segmented view (All / Recurring / One-time) over person/category/status/month filters; always-visible **Funds** and **Trips** sections; accordion cards for edit. Footer shows the provisioning baseline. |
 | `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments - targeting recurring items **or** funds. "Open in Overview" applies one. |
 | `/settings.html` | Manage the People and Category reference lists. |
 
@@ -36,6 +36,13 @@ merged. A one-time transaction can be **tagged to a fund** ("Draw from
 fund"), which still counts as cash flow but also draws the fund's balance
 down.
 
+**Reference ID**: recurring items have an optional free-text
+`reference_id` - a provider's key for a "pay in N months" plan (Affirm
+loan id, Klarna order reference, PayPal ...). It's **unique across
+recurring items**; adding or renaming one onto a value already in use is
+rejected with a 409, so an accidental re-entry of the same plan gets
+caught. Unset references never collide.
+
 **Sinking funds**: defined by an annualized amount (entered however you
 think about it - "$1,200/yr", "$85 every 7 weeks", "2× per year"). Each
 contributes `annual / 12` to the provisioning figure every month and
@@ -43,6 +50,18 @@ carries a running **balance** = (accrued since its start month) − (tagged
 transactions), which rolls over across years (overspend goes negative).
 One-off transactions are *not* counted in the provisioning figure - an
 unprovisioned surprise belongs in cash flow.
+
+**Trips**: read **live** from the trip-planning app
+(`TRIPS_API_BASE`, default `http://127.0.0.1:8060`, cached 30s) - its
+`GET /api/trips/cost-summary` sums non-archived activity costs + booked
+stay costs per trip. Each upcoming trip's cost is spread evenly across the
+months from now through the trip's month (provisioning only, never cash
+flow). **"Mark fully paid"** writes one `"<trip> (trip)"` transaction for
+the total into cash flow and drops the trip from the forecast; a per-trip
+**override** covers flights / anything not in trip-planning; **exclude**
+hides one without settling. `TripSettlement.trip_id` is a bare int keyed
+to trip-planning's DB - if that DB is wiped, settlements would point at
+the wrong trips.
 
 ## API
 
@@ -61,6 +80,10 @@ Plain JSON REST under `/api` (`/docs` for Swagger):
   `PATCH`/`DELETE /api/adjustments/{id}`. Adjustments target
   `target_recurring_id` **or** `target_fund_id`; a fund `add` uses
   `add_kind: "fund"`.
+- `/api/trips` - the trip forecast (`{upcoming, no_date, excluded}`);
+  `GET /api/trips/summary`; `PATCH /api/trips/{trip_id}` (exclude /
+  override); `POST /api/trips/{trip_id}/settle` and `/unsettle`. Costs come
+  from trip-planning; only settlement state is stored here.
 - `GET /api/monthly?month=YYYY-MM&person_id=&joint=&category_ids=&scenario_id=`
   - the aggregation the Overview page renders (`app/services/monthly.py`).
   `totals` = cash flow; `normalized` = provisioning (recurring smoothed +
@@ -71,8 +94,9 @@ directions; the frontend converts at the input/display edge only.
 
 ## Tests
 
-The aggregation and fund math are covered by `tests/test_monthly.py` and
-`tests/test_funds.py`:
+The aggregation, fund math, and trip forecasting are covered by
+`tests/test_monthly.py`, `tests/test_funds.py`, and `tests/test_trips.py`
+(the last monkeypatches the trip-planning call):
 
 ```bash
 cd finances && source venv/bin/activate && pytest
@@ -173,12 +197,31 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
 
 - **Seed data**: the baseline migration seeds two people (`Evan`, `Rach`)
   and a starter set of categories - all editable on the Settings page.
-- **Non-monthly recurring items** land only in their due month(s) for the
-  cash-flow total, but are spread evenly across the year in the
-  "Provisioned" / "provisioning baseline" figures.
+- **Payment calendar** (Overview): a month grid rendered client-side from
+  the `/api/monthly` response, so it honours the person/category/scenario
+  filters and the scenario tinting for free. Recurring items with no
+  `day_of_month` (and weekly/biweekly, and scenario-added lines) go in a
+  "No set day" line under the grid. No backend involved -
+  `renderCalendar()` in `static/app.js`.
+- **Recurring frequencies**: `weekly`, `biweekly`, `monthly`, `quarterly`,
+  `semiannual`, `annual`.
+  - *quarterly / semi-annual / annual* need an `anchor_month`; they hit the
+    cash-flow total only in their due month(s), but are spread evenly
+    across the year in the "Provisioned" figures.
+  - *weekly / biweekly* need no anchor - they're treated as landing every
+    month at a **smoothed** amount (`face × 52/12` or `× 26/12`), the same
+    figure in both cash-flow and provisioning (the app doesn't track which
+    weeks fall in which month).
+  - See `FREQUENCY_PER_MONTH` / `FREQUENCY_INTERVAL_MONTHS` in
+    `app/models.py` and `_recurring_amount` in `app/services/monthly.py`.
 - **Funds** always contribute their flat `annual / 12` to provisioning,
   every month, regardless of the selected month. Deleting a fund nulls the
   `fund_id` on any transactions tagged to it (they stay).
+- **Trips** need the trip-planning app reachable at `TRIPS_API_BASE`
+  (a local `127.0.0.1` call in both dev and prod - it sidesteps Cloudflare
+  Access). If it's down, the Trips section shows an unavailable notice and
+  the rest of the app is unaffected. A trip with no `start_date` in
+  trip-planning is listed but left out of the monthly math.
 - **Scenarios never mutate stored rows** - `app/services/monthly.py`
   applies adjustments to in-memory copies per request. Recurring/one-off
   adjustments move `totals` (cash flow); fund adjustments move `normalized`

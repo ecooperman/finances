@@ -109,7 +109,7 @@ function adjustmentFormHTML() {
         <div class="field">
           <label>Frequency</label>
           <select name="frequency">
-            ${opt("monthly", "Monthly")}${opt("quarterly", "Quarterly")}${opt("semiannual", "Semi-annual")}${opt("annual", "Annual")}
+            ${opt("weekly", "Weekly")}${opt("biweekly", "Biweekly")}${opt("monthly", "Monthly")}${opt("quarterly", "Quarterly")}${opt("semiannual", "Semi-annual")}${opt("annual", "Annual")}
           </select>
         </div>
         <div class="field fin-anchor-field">
@@ -187,7 +187,7 @@ function wireAdjustmentForm(form, scenarioId) {
     const isFund = addKind.value === "fund";
     recurringOnly.forEach((n) => n.classList.toggle("hidden", isFund));
     addAmountLabel.textContent = isFund ? "Amount ($) per year" : "Amount ($)";
-    anchorField.classList.toggle("hidden", isFund || freq.value === "monthly");
+    anchorField.classList.toggle("hidden", isFund || !isSubMonthlyFreq(freq.value));
     modifyLabel.textContent = modifyMode.value === "multiplier" ? "Factor (e.g. 0.5)" : "Amount ($)";
   };
   kind.addEventListener("change", sync);
@@ -214,7 +214,7 @@ function wireAdjustmentForm(form, scenarioId) {
       if (!isFund) {
         body.direction = g("direction").value;
         body.frequency = g("frequency").value;
-        body.anchor_month = g("frequency").value === "monthly" ? null : Number(g("anchor_month").value);
+        body.anchor_month = isSubMonthlyFreq(g("frequency").value) ? Number(g("anchor_month").value) : null;
       }
       if (!body.name || body.amount_cents == null || body.amount_cents <= 0) {
         return Global.showMessage("A new line needs a name and a positive amount.", "error");

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import func
@@ -140,6 +141,16 @@ def get_recurring_items(
 
 def get_recurring_item(db: Session, item_id: int):
     return db.query(models.RecurringItem).filter(models.RecurringItem.id == item_id).first()
+
+
+def recurring_reference_id_conflict(db: Session, reference_id, exclude_id=None):
+    """The other recurring item already using this reference_id, or None."""
+    if not reference_id:
+        return None
+    q = db.query(models.RecurringItem).filter(models.RecurringItem.reference_id == reference_id)
+    if exclude_id is not None:
+        q = q.filter(models.RecurringItem.id != exclude_id)
+    return q.first()
 
 
 def create_recurring_item(db: Session, item: schemas.RecurringItemCreate):
@@ -330,6 +341,77 @@ def delete_fund(db: Session, fund_id: int) -> bool:
     db.delete(db_fund)  # tagged transactions' fund_id -> NULL via FK
     db.commit()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Trip settlements (finances' per-trip state; cost is read live elsewhere)
+# ---------------------------------------------------------------------------
+
+
+def get_settlement(db: Session, trip_id: int):
+    return (
+        db.query(models.TripSettlement)
+        .filter(models.TripSettlement.trip_id == trip_id)
+        .first()
+    )
+
+
+def get_or_create_settlement(db: Session, trip_id: int) -> models.TripSettlement:
+    s = get_settlement(db, trip_id)
+    if s is None:
+        s = models.TripSettlement(trip_id=trip_id)
+        db.add(s)
+        db.commit()
+        db.refresh(s)
+    return s
+
+
+def update_settlement(db: Session, trip_id: int, updates: schemas.TripSettlementUpdate):
+    s = get_or_create_settlement(db, trip_id)
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(s, field, value)
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+def settle_trip(db: Session, trip_id: int, when, amount_cents: int, name: str,
+                travel_category_id):
+    """Mark a trip fully paid: create one cash-flow transaction for the
+    total and stamp the settlement. The trip then drops out of the forecast.
+    """
+    s = get_or_create_settlement(db, trip_id)
+    if s.settled_at is not None:
+        return s  # already settled - no-op
+    txn = models.Transaction(
+        date=when,
+        description=f"{name} (trip)",
+        amount_cents=amount_cents,
+        direction="out",
+        category_id=travel_category_id,
+    )
+    db.add(txn)
+    db.flush()
+    s.settled_at = datetime.utcnow()
+    s.settled_transaction_id = txn.id
+    db.commit()
+    db.refresh(s)
+    return s
+
+
+def unsettle_trip(db: Session, trip_id: int):
+    s = get_settlement(db, trip_id)
+    if s is None or s.settled_at is None:
+        return s
+    if s.settled_transaction_id is not None:
+        txn = get_transaction(db, s.settled_transaction_id)
+        if txn is not None:
+            db.delete(txn)
+    s.settled_at = None
+    s.settled_transaction_id = None
+    db.commit()
+    db.refresh(s)
+    return s
 
 
 # ---------------------------------------------------------------------------

@@ -11,3 +11,9 @@ PORT = 8080
 # hand-editing a URL and remembering to revert it.
 ENV = os.environ.get("APP_ENV", "local")
 SHARED_ASSETS_BASE = "https://static.evancooperman.com" if ENV == "production" else "http://127.0.0.1:8070"
+
+# The trip-planning app's base URL, for the trip cost forecast (see
+# app/services/trips.py). Same value local and in production: both talk to
+# the trip-planning process directly on 127.0.0.1:8060, which sidesteps
+# Cloudflare Access entirely. Only override if trip-planning moves.
+TRIPS_API_BASE = os.environ.get("TRIPS_API_BASE", "http://127.0.0.1:8060")

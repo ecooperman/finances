@@ -75,11 +75,18 @@ function personBadge(person) {
 }
 
 const FREQ_LABELS = {
+  weekly: "Weekly",
+  biweekly: "Biweekly",
   monthly: "Monthly",
   quarterly: "Quarterly",
   semiannual: "Semi-annual",
   annual: "Annual",
 };
+// Only these land in specific calendar months and so need an anchor month.
+const SUBMONTHLY_FREQS = ["quarterly", "semiannual", "annual"];
+function isSubMonthlyFreq(freq) {
+  return SUBMONTHLY_FREQS.includes(freq);
+}
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
@@ -193,6 +200,8 @@ function recurringScheduleBlockHTML(it) {
         <div class="field">
           <label>Frequency</label>
           <select name="frequency">
+            ${_opt("weekly", "Weekly", it.frequency || "monthly")}
+            ${_opt("biweekly", "Biweekly", it.frequency || "monthly")}
             ${_opt("monthly", "Monthly", it.frequency || "monthly")}
             ${_opt("quarterly", "Quarterly", it.frequency || "monthly")}
             ${_opt("semiannual", "Semi-annual", it.frequency || "monthly")}
@@ -211,6 +220,10 @@ function recurringScheduleBlockHTML(it) {
       <div class="field-row">
         <div class="field"><label>Starts (optional)</label><input name="start_month" type="month" value="${it.start_month || ""}" /></div>
         <div class="field"><label>Ends (optional)</label><input name="end_month" type="month" value="${it.end_month || ""}" /></div>
+      </div>
+      <div class="field">
+        <label>Reference ID (optional)</label>
+        <input name="reference_id" type="text" value="${escAttr(it.reference_id)}" placeholder="Affirm loan id, Klarna order ref, PayPal ..." />
       </div>
     </div>`;
 }
@@ -343,7 +356,7 @@ function wireEntryForm(scope, people, categories, funds = []) {
     recBlock.classList.toggle("hidden", t !== "recurring");
     nameText.textContent = t === "transaction" ? "Description" : "Name";
     if (t !== "recurring") freq.value = "monthly";
-    anchorField.classList.toggle("hidden", freq.value === "monthly");
+    anchorField.classList.toggle("hidden", !isSubMonthlyFreq(freq.value));
     if (dateInput) dateInput.required = t === "transaction";
     fundNField.classList.toggle("hidden", !["weeks", "months", "times_year"].includes(fundUnit.value));
     refreshFundPreview();
@@ -400,16 +413,17 @@ function readEntryForm(scope) {
     direction: g("direction").value,
   };
   if (t === "recurring") {
-    const monthly = g("frequency").value === "monthly";
+    const freq = g("frequency").value;
     return {
       type: "recurring",
       body: {
         ...base,
-        frequency: g("frequency").value,
-        anchor_month: monthly ? null : Number(g("anchor_month").value),
+        frequency: freq,
+        anchor_month: isSubMonthlyFreq(freq) ? Number(g("anchor_month").value) : null,
         day_of_month: g("day_of_month").value ? Number(g("day_of_month").value) : null,
         start_month: g("start_month").value || null,
         end_month: g("end_month").value || null,
+        reference_id: g("reference_id").value.trim() || null,
         active: true,
       },
     };

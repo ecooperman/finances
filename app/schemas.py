@@ -16,8 +16,11 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 Direction = Literal["in", "out"]
-Frequency = Literal["monthly", "quarterly", "semiannual", "annual"]
+Frequency = Literal["weekly", "biweekly", "monthly", "quarterly", "semiannual", "annual"]
 AdjustmentKind = Literal["add", "remove", "modify"]
+# Only these need an anchor_month (they land in specific calendar months);
+# weekly/biweekly/monthly land every month.
+SUBMONTHLY_FREQUENCIES = {"quarterly", "semiannual", "annual"}
 AddKind = Literal["recurring", "fund"]
 FundEntryUnit = Literal["year", "month", "weeks", "months", "times_year"]
 
@@ -46,6 +49,13 @@ def _valid_anchor_month(v: Optional[int]) -> Optional[int]:
     if not 1 <= v <= 12:
         raise ValueError("anchor_month must be 1-12")
     return v
+
+
+def _blank_to_none(v: Optional[str]) -> Optional[str]:
+    if v is None:
+        return None
+    v = v.strip()
+    return v or None
 
 
 # ---------------------------------------------------------------------------
@@ -122,16 +132,18 @@ class RecurringItemBase(BaseModel):
     start_month: Optional[str] = None
     end_month: Optional[str] = None
     notes: Optional[str] = None
+    reference_id: Optional[str] = None  # provider ref for a BNPL plan; unique
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
     _check_anchor = field_validator("anchor_month")(_valid_anchor_month)
     _check_start = field_validator("start_month")(_valid_month_str)
     _check_end = field_validator("end_month")(_valid_month_str)
+    _check_ref = field_validator("reference_id")(_blank_to_none)
 
     @model_validator(mode="after")
-    def _anchor_required_for_non_monthly(self):
-        if self.frequency != "monthly" and self.anchor_month is None:
-            raise ValueError("anchor_month is required for non-monthly frequencies")
+    def _anchor_required_for_submonthly(self):
+        if self.frequency in SUBMONTHLY_FREQUENCIES and self.anchor_month is None:
+            raise ValueError("anchor_month is required for quarterly / semi-annual / annual")
         return self
 
 
@@ -152,11 +164,13 @@ class RecurringItemUpdate(BaseModel):
     start_month: Optional[str] = None
     end_month: Optional[str] = None
     notes: Optional[str] = None
+    reference_id: Optional[str] = None
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
     _check_anchor = field_validator("anchor_month")(_valid_anchor_month)
     _check_start = field_validator("start_month")(_valid_month_str)
     _check_end = field_validator("end_month")(_valid_month_str)
+    _check_ref = field_validator("reference_id")(_blank_to_none)
 
 
 class RecurringItem(RecurringItemBase):
@@ -229,9 +243,9 @@ class ConvertToRecurring(BaseModel):
     _check_end = field_validator("end_month")(_valid_month_str)
 
     @model_validator(mode="after")
-    def _anchor_required_for_non_monthly(self):
-        if self.frequency != "monthly" and self.anchor_month is None:
-            raise ValueError("anchor_month is required for non-monthly frequencies")
+    def _anchor_required_for_submonthly(self):
+        if self.frequency in SUBMONTHLY_FREQUENCIES and self.anchor_month is None:
+            raise ValueError("anchor_month is required for quarterly / semi-annual / annual")
         return self
 
 
@@ -318,6 +332,50 @@ class FundsSummary(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Trip cost forecast (cost read live from the trip-planning app)
+# ---------------------------------------------------------------------------
+
+
+class TripForecastRow(BaseModel):
+    trip_id: int
+    name: str
+    trip_month: Optional[str] = None  # "YYYY-MM"; None = no date set in trip-planning
+    total_cents: int  # what's forecast (override if set, else computed)
+    computed_total_cents: int  # trip-planning's activities + booked stays
+    override_amount_cents: Optional[int] = None
+    monthly_contribution_cents: int  # total spread over months_remaining
+    months_remaining: Optional[int] = None
+    excluded: bool = False
+    settled_at: Optional[str] = None
+
+
+class TripForecasts(BaseModel):
+    upcoming: List[TripForecastRow] = []
+    no_date: List[TripForecastRow] = []
+    excluded: List[TripForecastRow] = []
+
+
+class TripSettlementUpdate(BaseModel):
+    excluded: Optional[bool] = None
+    override_amount_cents: Optional[int] = None
+    note: Optional[str] = None
+
+    _check_override = field_validator("override_amount_cents")(_positive_cents)
+
+
+class SettleTripRequest(BaseModel):
+    date: date_type
+    amount_cents: Optional[int] = None  # defaults to the trip's forecast total
+
+    _check_amount = field_validator("amount_cents")(_positive_cents)
+
+
+class TripsSummary(BaseModel):
+    upcoming_count: int
+    monthly_total_cents: int
+
+
+# ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
 
@@ -336,8 +394,8 @@ def _check_adjustment_shape(obj):
             missing = [f for f in ("name", "amount_cents", "direction") if getattr(obj, f) is None]
             if missing:
                 raise ValueError(f"'add' adjustment requires: {', '.join(missing)}")
-            if obj.frequency and obj.frequency != "monthly" and obj.anchor_month is None:
-                raise ValueError("anchor_month is required for non-monthly 'add' adjustments")
+            if obj.frequency in SUBMONTHLY_FREQUENCIES and obj.anchor_month is None:
+                raise ValueError("anchor_month is required for quarterly / semi-annual / annual 'add' adjustments")
         return obj
 
     has_recurring = obj.target_recurring_id is not None
@@ -443,7 +501,7 @@ class Scenario(ScenarioBase):
 
 
 class MonthRow(BaseModel):
-    kind: Literal["recurring", "transaction", "fund"]
+    kind: Literal["recurring", "transaction", "fund", "trip"]
     id: int
     name: str
     amount_cents: int

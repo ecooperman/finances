@@ -31,10 +31,21 @@ from .database import Base
 
 # Allowed values for the String "enum" columns - enforced in schemas.py.
 DIRECTIONS = ("in", "out")
-FREQUENCIES = ("monthly", "quarterly", "semiannual", "annual")
-# How many months apart each cadence repeats (drives both which months a
-# non-monthly item lands in and the "normalized to per-month" figure).
-FREQUENCY_MONTHS = {"monthly": 1, "quarterly": 3, "semiannual": 6, "annual": 12}
+FREQUENCIES = ("weekly", "biweekly", "monthly", "quarterly", "semiannual", "annual")
+# Occurrences per calendar month - the multiplier for the smoothed
+# ("per month") figure. Weekly/biweekly are treated as landing every month
+# at this smoothed amount (the app doesn't track which weeks fall where).
+FREQUENCY_PER_MONTH = {
+    "weekly": 52 / 12,
+    "biweekly": 26 / 12,
+    "monthly": 1.0,
+    "quarterly": 1 / 3,
+    "semiannual": 1 / 6,
+    "annual": 1 / 12,
+}
+# Months between occurrences - only the sub-monthly cadences restrict which
+# calendar months they land in (and so need an anchor_month).
+FREQUENCY_INTERVAL_MONTHS = {"quarterly": 3, "semiannual": 6, "annual": 12}
 ADJUSTMENT_KINDS = ("add", "remove", "modify")
 # How a sinking fund's contribution rate was entered - stored so the form
 # round-trips. `annual_amount_cents` is always the derived canonical value.
@@ -73,6 +84,13 @@ class RecurringItem(Base):
     """
 
     __tablename__ = "recurring_items"
+    __table_args__ = (
+        # A provider's reference for a "pay in N months" plan (Affirm calls
+        # it a loan id, Klarna an order reference, PayPal something else) -
+        # enforcing uniqueness catches an accidental re-entry. SQLite treats
+        # NULLs as distinct, so unset references never collide.
+        UniqueConstraint("reference_id", name="uq_recurring_reference_id"),
+    )
 
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False)
@@ -80,9 +98,10 @@ class RecurringItem(Base):
     direction = Column(String, nullable=False)  # "in" | "out"
     frequency = Column(String, nullable=False, default="monthly")
 
-    # For non-monthly items: 1-12, the first calendar month the item lands
-    # in. Subsequent hits are anchor_month + N * FREQUENCY_MONTHS[frequency].
-    # Ignored for monthly items.
+    # For sub-monthly cadences (quarterly/semi-annual/annual): 1-12, the
+    # first calendar month the item lands in; subsequent hits are
+    # anchor_month + N * FREQUENCY_INTERVAL_MONTHS[frequency]. Ignored for
+    # weekly/biweekly/monthly (which land every month).
     anchor_month = Column(Integer, nullable=True)
     # Purely informational - which day of the month it hits, for display and
     # row ordering. Not used in any math.
@@ -97,6 +116,9 @@ class RecurringItem(Base):
     end_month = Column(String, nullable=True)
 
     notes = Column(String, nullable=True)
+    # Optional provider reference for a "pay in N months" plan
+    # (Affirm/Klarna/PayPal). Unique across recurring items - see __table_args__.
+    reference_id = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -183,6 +205,36 @@ class SinkingFund(Base):
 
     category = relationship("Category", lazy="joined")
     person = relationship("Person", lazy="joined")
+
+
+class TripSettlement(Base):
+    """Finances' own view of a trip in the trip-planning app. Rows are
+    created lazily the first time a trip is excluded, given an override, or
+    marked paid. The trip's *cost* is read live from trip-planning (see
+    app/services/trips.py) and never stored here.
+
+    `trip_id` is trip-planning's `Trip.id` - a bare int, not an FK (the two
+    apps have separate databases).
+    """
+
+    __tablename__ = "trip_settlements"
+
+    id = Column(Integer, primary_key=True)
+    trip_id = Column(Integer, nullable=False, unique=True)
+    # Hide from the forecast without marking it paid.
+    excluded = Column(Boolean, nullable=False, default=False)
+    # Use this instead of trip-planning's computed total (flights, etc.).
+    override_amount_cents = Column(Integer, nullable=True)
+    # Set when "fully paid" - the trip then drops out of the forecast and
+    # `settled_transaction_id` points at the one-off cash-flow transaction.
+    settled_at = Column(DateTime, nullable=True)
+    settled_transaction_id = Column(
+        Integer, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+    )
+    note = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Scenario(Base):

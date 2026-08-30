@@ -96,6 +96,31 @@ def test_quarterly_item_lands_every_third_month(db):
     assert landed == [2, 5, 8, 11]
 
 
+def test_weekly_item_is_smoothed_and_lands_every_month(db):
+    # $100/week -> $100 * 52/12 = $433.33/mo, in BOTH cash flow and provisioning
+    _recurring(db, name="Cleaner", amount_cents=10_000, direction="out", frequency="weekly")
+    per_mo = round(10_000 * 52 / 12)  # 43_333
+    for m in (1, 6, 12):
+        res = compute_month(db, f"2026-{m:02d}")
+        assert res.totals.out_cents == per_mo
+        assert res.normalized.out_cents == per_mo
+
+
+def test_biweekly_item_uses_26_over_12(db):
+    _recurring(db, name="Affirm plan", amount_cents=20_000, direction="out", frequency="biweekly")
+    per_mo = round(20_000 * 26 / 12)  # 43_333
+    res = compute_month(db, "2026-04")
+    assert res.totals.out_cents == per_mo
+    assert res.normalized.out_cents == per_mo
+
+
+def test_weekly_needs_no_anchor_but_quarterly_still_does(db):
+    schemas.RecurringItemCreate(name="w", amount_cents=1, direction="out", frequency="weekly")
+    schemas.RecurringItemCreate(name="b", amount_cents=1, direction="out", frequency="biweekly")
+    with pytest.raises(Exception):
+        schemas.RecurringItemCreate(name="q", amount_cents=1, direction="out", frequency="quarterly")
+
+
 def test_start_and_end_month_bounds(db):
     _recurring(db, name="Car loan", amount_cents=45_000, direction="out", start_month="2026-03", end_month="2026-05")
     assert compute_month(db, "2026-02").totals.out_cents == 0
