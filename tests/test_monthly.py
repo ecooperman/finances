@@ -121,6 +121,18 @@ def test_weekly_needs_no_anchor_but_quarterly_still_does(db):
         schemas.RecurringItemCreate(name="q", amount_cents=1, direction="out", frequency="quarterly")
 
 
+def test_day_of_week_flows_to_the_month_row(db):
+    _recurring(db, name="Cleaner", amount_cents=10_000, direction="out",
+               frequency="weekly", day_of_week=5, week_anchor=date(2026, 8, 7))
+    row = next(r for r in compute_month(db, "2026-09").money_out if r.name == "Cleaner")
+    assert row.day_of_week == 5
+    assert row.week_anchor == "2026-08-07"  # ISO string for the frontend
+    # day_of_week must be 0-6
+    with pytest.raises(Exception):
+        schemas.RecurringItemCreate(name="x", amount_cents=1, direction="out",
+                                    frequency="weekly", day_of_week=9)
+
+
 def test_start_and_end_month_bounds(db):
     _recurring(db, name="Car loan", amount_cents=45_000, direction="out", start_month="2026-03", end_month="2026-05")
     assert compute_month(db, "2026-02").totals.out_cents == 0

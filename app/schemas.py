@@ -51,6 +51,14 @@ def _valid_anchor_month(v: Optional[int]) -> Optional[int]:
     return v
 
 
+def _valid_day_of_week(v: Optional[int]) -> Optional[int]:
+    if v is None:
+        return None
+    if not 0 <= v <= 6:
+        raise ValueError("day_of_week must be 0 (Sunday) .. 6 (Saturday)")
+    return v
+
+
 def _blank_to_none(v: Optional[str]) -> Optional[str]:
     if v is None:
         return None
@@ -126,6 +134,8 @@ class RecurringItemBase(BaseModel):
     frequency: Frequency = "monthly"
     anchor_month: Optional[int] = None
     day_of_month: Optional[int] = None
+    day_of_week: Optional[int] = None  # 0=Sun..6=Sat, for weekly/biweekly
+    week_anchor: Optional[date_type] = None  # a real date, for biweekly phase
     category_id: Optional[int] = None
     person_id: Optional[int] = None
     active: bool = True
@@ -136,6 +146,7 @@ class RecurringItemBase(BaseModel):
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
     _check_anchor = field_validator("anchor_month")(_valid_anchor_month)
+    _check_dow = field_validator("day_of_week")(_valid_day_of_week)
     _check_start = field_validator("start_month")(_valid_month_str)
     _check_end = field_validator("end_month")(_valid_month_str)
     _check_ref = field_validator("reference_id")(_blank_to_none)
@@ -158,6 +169,8 @@ class RecurringItemUpdate(BaseModel):
     frequency: Optional[Frequency] = None
     anchor_month: Optional[int] = None
     day_of_month: Optional[int] = None
+    day_of_week: Optional[int] = None
+    week_anchor: Optional[date_type] = None
     category_id: Optional[int] = None
     person_id: Optional[int] = None
     active: Optional[bool] = None
@@ -168,6 +181,7 @@ class RecurringItemUpdate(BaseModel):
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
     _check_anchor = field_validator("anchor_month")(_valid_anchor_month)
+    _check_dow = field_validator("day_of_week")(_valid_day_of_week)
     _check_start = field_validator("start_month")(_valid_month_str)
     _check_end = field_validator("end_month")(_valid_month_str)
     _check_ref = field_validator("reference_id")(_blank_to_none)
@@ -508,6 +522,9 @@ class MonthRow(BaseModel):
     direction: Direction
     frequency: Optional[str] = None
     day: Optional[int] = None
+    # weekly/biweekly only - lets the calendar place one entry per occurrence.
+    day_of_week: Optional[int] = None
+    week_anchor: Optional[str] = None
     category: Optional[Category] = None
     person: Optional[Person] = None
     # "normal" for real rows; "added"/"removed"/"modified" when a scenario

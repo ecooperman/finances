@@ -96,10 +96,12 @@ def _passes_filters(
 
 
 def _row(kind, id_, name, amount_cents, direction, *, frequency=None, day=None,
-         category=None, person=None, effect="normal", original_amount_cents=None) -> dict:
+         day_of_week=None, week_anchor=None, category=None, person=None,
+         effect="normal", original_amount_cents=None) -> dict:
     return dict(
         kind=kind, id=id_, name=name, amount_cents=amount_cents, direction=direction,
-        frequency=frequency, day=day, category=category, person=person, effect=effect,
+        frequency=frequency, day=day, day_of_week=day_of_week, week_anchor=week_anchor,
+        category=category, person=person, effect=effect,
         original_amount_cents=original_amount_cents,
     )
 
@@ -132,6 +134,8 @@ def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
         rows.append(_row(
             "recurring", item.id, item.name, amount, item.direction,
             frequency=item.frequency, day=item.day_of_month,
+            day_of_week=item.day_of_week,
+            week_anchor=item.week_anchor.isoformat() if item.week_anchor else None,
             category=_cat(item.category), person=_person(item.person),
         ))
     return rows

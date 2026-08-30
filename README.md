@@ -208,10 +208,13 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   - *quarterly / semi-annual / annual* need an `anchor_month`; they hit the
     cash-flow total only in their due month(s), but are spread evenly
     across the year in the "Provisioned" figures.
-  - *weekly / biweekly* need no anchor - they're treated as landing every
-    month at a **smoothed** amount (`face × 52/12` or `× 26/12`), the same
-    figure in both cash-flow and provisioning (the app doesn't track which
-    weeks fall in which month).
+  - *weekly / biweekly* need no month anchor. The totals use a **smoothed**
+    amount (`face × 52/12` or `× 26/12`), same figure in cash-flow and
+    provisioning. If you set a **day of week**, the payment calendar draws
+    one entry per occurrence with the smoothed monthly amount split across
+    them (so day-nets still sum to the smoothed figure); biweekly also
+    takes an optional **anchor date** to fix the every-14-days phase (no
+    anchor → every other matching weekday from the first one in the month).
   - See `FREQUENCY_PER_MONTH` / `FREQUENCY_INTERVAL_MONTHS` in
     `app/models.py` and `_recurring_amount` in `app/services/monthly.py`.
 - **Funds** always contribute their flat `annual / 12` to provisioning,

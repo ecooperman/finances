@@ -87,10 +87,34 @@ const SUBMONTHLY_FREQS = ["quarterly", "semiannual", "annual"];
 function isSubMonthlyFreq(freq) {
   return SUBMONTHLY_FREQS.includes(freq);
 }
+function isWeeklyFreq(freq) {
+  return freq === "weekly" || freq === "biweekly";
+}
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+// Day-of-month numbers a weekly/biweekly item falls on within `month` (1-12).
+// everyOther=true (biweekly): keep the every-14-days phase from `anchorISO`
+// if given, else every other matching weekday from the first one this month.
+function weekdayOccurrences(year, month, dow, anchorISO, everyOther) {
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const days = [];
+  for (let d = 1; d <= daysInMonth; d++) {
+    if (new Date(year, month - 1, d).getDay() === dow) days.push(d);
+  }
+  if (!everyOther) return days;
+  if (anchorISO) {
+    const anchor = new Date(anchorISO + "T00:00:00");
+    return days.filter((d) => {
+      const diff = Math.round((new Date(year, month - 1, d) - anchor) / 86400000);
+      return diff % 14 === 0;
+    });
+  }
+  return days.filter((_, i) => i % 2 === 0);
+}
 
 function freqLabel(freq) {
   return FREQ_LABELS[freq] || freq || "";
@@ -217,6 +241,19 @@ function recurringScheduleBlockHTML(it) {
           <input name="day_of_month" type="number" min="1" max="31" value="${it.day_of_month || ""}" placeholder="opt." />
         </div>
       </div>
+      <div class="field-row fin-week-row">
+        <div class="field fin-dow-field">
+          <label>Day of week</label>
+          <select name="day_of_week">
+            <option value="">—</option>
+            ${WEEKDAY_NAMES.map((n, i) => _opt(i, n, it.day_of_week == null ? "" : it.day_of_week)).join("")}
+          </select>
+        </div>
+        <div class="field fin-anchor-date-field">
+          <label>Anchor date (a date it was paid)</label>
+          <input name="week_anchor" type="date" value="${it.week_anchor || ""}" />
+        </div>
+      </div>
       <div class="field-row">
         <div class="field"><label>Starts (optional)</label><input name="start_month" type="month" value="${it.start_month || ""}" /></div>
         <div class="field"><label>Ends (optional)</label><input name="end_month" type="month" value="${it.end_month || ""}" /></div>
@@ -336,6 +373,8 @@ function wireEntryForm(scope, people, categories, funds = []) {
   const nameText = scope.querySelector('[data-role="name-text"]');
   const freq = scope.querySelector('[name="frequency"]');
   const anchorField = scope.querySelector(".fin-anchor-field");
+  const dowField = scope.querySelector(".fin-dow-field");
+  const weekAnchorField = scope.querySelector(".fin-anchor-date-field");
   const dateInput = scope.querySelector('[name="date"]');
   const fundUnit = scope.querySelector('[name="fund_unit"]');
   const fundNField = scope.querySelector(".fin-fund-n-field");
@@ -357,6 +396,8 @@ function wireEntryForm(scope, people, categories, funds = []) {
     nameText.textContent = t === "transaction" ? "Description" : "Name";
     if (t !== "recurring") freq.value = "monthly";
     anchorField.classList.toggle("hidden", !isSubMonthlyFreq(freq.value));
+    if (dowField) dowField.classList.toggle("hidden", !isWeeklyFreq(freq.value));
+    if (weekAnchorField) weekAnchorField.classList.toggle("hidden", freq.value !== "biweekly");
     if (dateInput) dateInput.required = t === "transaction";
     fundNField.classList.toggle("hidden", !["weeks", "months", "times_year"].includes(fundUnit.value));
     refreshFundPreview();
@@ -421,6 +462,9 @@ function readEntryForm(scope) {
         frequency: freq,
         anchor_month: isSubMonthlyFreq(freq) ? Number(g("anchor_month").value) : null,
         day_of_month: g("day_of_month").value ? Number(g("day_of_month").value) : null,
+        day_of_week:
+          isWeeklyFreq(freq) && g("day_of_week").value !== "" ? Number(g("day_of_week").value) : null,
+        week_anchor: freq === "biweekly" ? g("week_anchor").value || null : null,
         start_month: g("start_month").value || null,
         end_month: g("end_month").value || null,
         reference_id: g("reference_id").value.trim() || null,

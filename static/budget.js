@@ -65,7 +65,13 @@ function wireAnchor(scope) {
   const freq = scope.querySelector('[name="frequency"]');
   const anchorField = scope.querySelector(".fin-anchor-field");
   if (!freq || !anchorField) return;
-  const sync = () => anchorField.classList.toggle("hidden", !isSubMonthlyFreq(freq.value));
+  const dowField = scope.querySelector(".fin-dow-field");
+  const weekAnchorField = scope.querySelector(".fin-anchor-date-field");
+  const sync = () => {
+    anchorField.classList.toggle("hidden", !isSubMonthlyFreq(freq.value));
+    if (dowField) dowField.classList.toggle("hidden", !isWeeklyFreq(freq.value));
+    if (weekAnchorField) weekAnchorField.classList.toggle("hidden", freq.value !== "biweekly");
+  };
   freq.addEventListener("change", sync);
   sync();
 }
@@ -154,6 +160,9 @@ function readRecurring(scope) {
     frequency: freq,
     anchor_month: isSubMonthlyFreq(freq) ? Number(g("anchor_month").value) : null,
     day_of_month: g("day_of_month").value ? Number(g("day_of_month").value) : null,
+    day_of_week:
+      isWeeklyFreq(freq) && g("day_of_week").value !== "" ? Number(g("day_of_week").value) : null,
+    week_anchor: freq === "biweekly" ? g("week_anchor").value || null : null,
     category_id: g("category_id").value || null,
     person_id: g("person_id").value || null,
     start_month: g("start_month").value || null,

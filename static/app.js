@@ -84,22 +84,38 @@ function renderCalendar(month, rows) {
   const noDayEl = document.getElementById("cal-noday");
   cal.innerHTML = "";
 
+  const [y, m] = month.split("-").map(Number);
   const byDay = new Map();
   const noDay = [];
+  const addToDay = (d, r) => {
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(r);
+  };
   for (const r of rows) {
+    // weekly / biweekly with a chosen weekday: one entry per occurrence,
+    // the smoothed monthly amount split across them (totals stay the same).
+    if (isWeeklyFreq(r.frequency) && r.day_of_week != null) {
+      const occ = weekdayOccurrences(y, m, r.day_of_week, r.week_anchor, r.frequency === "biweekly");
+      if (occ.length) {
+        const per = Math.round(r.amount_cents / occ.length);
+        occ.forEach((d, i) => {
+          const amt = i === occ.length - 1 ? r.amount_cents - per * (occ.length - 1) : per;
+          addToDay(d, { ...r, amount_cents: amt, day: d });
+        });
+        continue;
+      }
+    }
     if (r.day == null) {
       noDay.push(r);
       continue;
     }
-    if (!byDay.has(r.day)) byDay.set(r.day, []);
-    byDay.get(r.day).push(r);
+    addToDay(r.day, r);
   }
 
   const head = el("div", { class: "fin-cal-head" });
   for (const w of CAL_WEEKDAYS) head.appendChild(el("div", { class: "fin-cal-hcell", text: w }));
   cal.appendChild(head);
 
-  const [y, m] = month.split("-").map(Number);
   const startDow = new Date(y, m - 1, 1).getDay();
   const daysInMonth = new Date(y, m, 0).getDate();
   const cellCount = Math.ceil((startDow + daysInMonth) / 7) * 7;

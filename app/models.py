@@ -106,6 +106,15 @@ class RecurringItem(Base):
     # Purely informational - which day of the month it hits, for display and
     # row ordering. Not used in any math.
     day_of_month = Column(Integer, nullable=True)
+    # For weekly/biweekly: 0=Sunday .. 6=Saturday. Lets the Overview calendar
+    # place an entry on each occurrence (the amount stays smoothed - each
+    # occurrence shows the monthly figure / number of occurrences). No effect
+    # on any total.
+    day_of_week = Column(Integer, nullable=True)
+    # For biweekly: a real date the payment fell on, so the every-14-days
+    # phase is known. Optional - without it, biweekly is drawn on every other
+    # matching weekday counting from the first one in the month.
+    week_anchor = Column(Date, nullable=True)
 
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
     person_id = Column(Integer, ForeignKey("people.id", ondelete="SET NULL"), nullable=True)
