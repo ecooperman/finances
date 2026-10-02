@@ -201,8 +201,37 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   the `/api/monthly` response, so it honours the person/category/scenario
   filters and the scenario tinting for free. Recurring items with no
   `day_of_month` (and weekly/biweekly, and scenario-added lines) go in a
-  "No set day" line under the grid. No backend involved -
-  `renderCalendar()` in `static/app.js`.
+  "No set day" line under the grid. Rendered client-side by
+  `renderCalendar()` in `static/app.js`. **Click a day** to open a detail
+  modal (`openDayModal()`): every item that lands that day with its
+  amount, cadence, category, person, schedule, start/end, reference ID,
+  account and notes, plus a net total labelled **Net in** (a payday) or
+  **Net out** with the in/out split and the month's running total through
+  that day.
+- **Carrying over unpaid items**: in the day pop-up, a money-out recurring
+  item has **"Couldn't pay this - carry to <next month>"**. It's then
+  dropped from that month's cash flow / running total (shown struck
+  through, tagged "carried to Nov") and appears on the **1st of the next
+  month** as a counted "↪ carried over from Oct" line. If that month you
+  can't pay it either, the carried line has the same button and keeps
+  rolling; a carried line you don't re-defer counts as paid in its month.
+  **Undo** on the deferred row puts it back (and removes any later
+  carries). A note under the calendar totals what came in and what went
+  out. Whole-item-month granularity (a biweekly item with 3 paydays defers
+  all 3), money-out items only (recurring, or a one-off transaction dated in
+  that month), cash flow only (the Provisioned
+  figure ignores it), and the "Until next paycheck" card honours it.
+  Stored in `payment_deferrals` (`app/services/deferrals.py`,
+  `POST /api/deferrals` with `recurring_item_id`+`month`, `transaction_id`,
+  or `origin_id`; `DELETE /api/deferrals/{id}`).
+- **Running total** (calendar): each day with entries shows its net plus
+  a `Σ` month-to-date net (starts at $0 on the 1st, adds every dated
+  payday and payment in order). Items with no set day can't be placed, so
+  they're left out and listed under the grid. It's net activity, not a
+  bank balance - there's no starting balance yet.
+- **Date-grouped lists**: the money-in / money-out lists under the calendar
+  group items by pay day, with a slim weekday/day-number gutter so the
+  items keep their width (weekly items group under "↻", undated under "—").
 - **Until next paycheck** (Overview, top card): `GET /api/until-paycheck`
   (`app/services/paycheck.py`) walks the real dated payments - recurring
   items placed by `schedule.py`, plus one-off transactions - from today to
@@ -216,14 +245,16 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   - *quarterly / semi-annual / annual* need an `anchor_month`; they hit the
     cash-flow total only in their due month(s), but are spread evenly
     across the year in the "Provisioned" figures.
-  - *weekly / biweekly* need no month anchor. The totals use a **smoothed**
-    amount (`face × 52/12` or `× 26/12`), same figure in cash-flow and
-    provisioning. If you set a **day of week**, the payment calendar draws
-    one entry per real pay day at the **real per-payment amount** (a $6,000
-    biweekly paycheck shows +$6,000 on each payday - not the smoothed
-    monthly share), so a month's calendar can add up to more or less than
-    its smoothed total. Biweekly also takes an optional **anchor date** to
-    fix the every-14-days phase (no anchor → every other matching weekday
+  - *weekly / biweekly* need no month anchor. If you set a **day of
+    week**, the item is dated: the payment calendar draws one entry per
+    real pay day at the **real per-payment amount**, and the **cash-flow**
+    total counts every real pay day (a $6,000 biweekly paycheck is
+    $18,000 in a 3-paycheck month, $12,000 in a 2-paycheck one). The
+    **Provisioned** figure stays smoothed (`face × 52/12` or `× 26/12`)
+    so it doesn't swing month to month. An item with *no* weekday set can't
+    be placed, so it uses the smoothed amount in both. Biweekly also takes
+    an optional **anchor date** to fix the every-14-days phase (no anchor
+    → every other matching weekday
     from the first one in the month). `app/services/schedule.py` is the
     single source of truth for which days an item pays on.
   - See `FREQUENCY_PER_MONTH` / `FREQUENCY_INTERVAL_MONTHS` in

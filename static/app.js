@@ -24,6 +24,16 @@ const totalsEl = document.getElementById("totals");
 
 // --- rows --------------------------------------------------------------
 
+// "2026-09" -> "Sep" (short, for tags); monthLabel() gives the long form.
+function shortMonth(ym) {
+  return MONTH_NAMES[Number(ym.slice(5, 7)) - 1].slice(0, 3);
+}
+
+// Scenario-removed and carried-to-next-month rows are shown but not counted.
+function countsInTotals(r) {
+  return r.effect !== "removed" && r.effect !== "deferred";
+}
+
 function row(r) {
   const node = el("div", { class: "fin-item fin-item-" + r.effect });
 
@@ -33,11 +43,22 @@ function row(r) {
   }
   main.appendChild(el("span", { class: "fin-item-name", text: r.name }));
   if (r.kind === "recurring" && r.frequency && r.frequency !== "monthly") {
-    main.appendChild(el("span", { class: "fin-cadence", text: freqLabel(r.frequency) }));
+    const n = r.occurrence_days ? r.occurrence_days.length : 0;
+    main.appendChild(el("span", {
+      class: "fin-cadence",
+      text: freqLabel(r.frequency) + (n > 1 ? ` · ${n}×` : ""),
+      title: n > 1 ? `${n} pay days this month, ${fmtMoney(r.face_amount_cents)} each` : "",
+    }));
   }
   if (r.effect === "added") main.appendChild(el("span", { class: "fin-tag fin-tag-added", text: "added" }));
   if (r.effect === "removed") main.appendChild(el("span", { class: "fin-tag fin-tag-removed", text: "removed" }));
   if (r.effect === "modified") main.appendChild(el("span", { class: "fin-tag fin-tag-modified", text: "changed" }));
+  if (r.kind === "carryover") {
+    main.appendChild(el("span", { class: "fin-tag fin-tag-carry", text: `carried from ${shortMonth(r.carried_from)}` }));
+  }
+  if (r.effect === "deferred") {
+    main.appendChild(el("span", { class: "fin-tag fin-tag-deferred", text: `carried to ${shortMonth(r.deferred_to)}` }));
+  }
 
   const meta = el("div", { class: "fin-item-meta" }, [categoryChip(r.category), personBadge(r.person)]);
 
@@ -55,13 +76,48 @@ function row(r) {
   return node;
 }
 
+// Rows are grouped under a tiny date gutter ("Fri / 16"). Weekly/biweekly
+// items with a weekday sit in a per-weekday group ("Fri ↻"); items with no
+// day at all go last under "—".
+function dayGroupOf(r) {
+  const [y, m] = state.month.split("-").map(Number);
+  if (r.day != null) {
+    const dt = new Date(y, m - 1, r.day);
+    return {
+      key: "d" + r.day, order: r.day, top: CAL_WEEKDAYS[dt.getDay()], bottom: String(r.day),
+      title: dt.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" }),
+    };
+  }
+  if (r.occurrence_days && r.occurrence_days.length && r.day_of_week != null) {
+    return {
+      key: "w" + r.day_of_week, order: 100 + r.day_of_week, top: CAL_WEEKDAYS[r.day_of_week],
+      bottom: "↻", title: `Repeats on ${WEEKDAY_NAMES[r.day_of_week]}s`,
+    };
+  }
+  return { key: "none", order: 1000, top: "—", bottom: "", title: "No day set" };
+}
+
 function renderList(container, rows) {
   container.innerHTML = "";
   if (!rows.length) {
     container.appendChild(el("p", { class: "empty-state", text: "Nothing here for this month." }));
     return;
   }
-  for (const r of rows) container.appendChild(row(r));
+  const groups = new Map();
+  for (const r of rows) {
+    const g = dayGroupOf(r);
+    if (!groups.has(g.key)) groups.set(g.key, { ...g, rows: [] });
+    groups.get(g.key).rows.push(r);
+  }
+  for (const g of [...groups.values()].sort((x, y) => x.order - y.order)) {
+    container.appendChild(el("div", { class: "fin-daygroup" }, [
+      el("div", { class: "fin-daygroup-date", title: g.title }, [
+        el("span", { class: "fin-daygroup-top", text: g.top }),
+        el("span", { class: "fin-daygroup-num", text: g.bottom }),
+      ]),
+      el("div", { class: "fin-daygroup-items" }, g.rows.map(row)),
+    ]));
+  }
   if (typeof applyIcons === "function") applyIcons(container);
 }
 
@@ -69,13 +125,26 @@ function renderList(container, rows) {
 
 const CAL_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const CAL_ENTRY_CAP = 4;
+let CAL_BY_DAY = new Map();
+let CAL_MONTH = "";
+let CAL_RUN = new Map(); // day -> month-to-date net after that day
+
+// Net of a day's entries; scenario-removed rows don't count.
+function dayNet(entries) {
+  return entries
+    .filter(countsInTotals)
+    .reduce((s, r) => s + (r.direction === "in" ? r.amount_cents : -r.amount_cents), 0);
+}
 
 function calEntry(r) {
   const effect = r.effect && r.effect !== "normal" ? " fin-cal-e-" + r.effect : "";
+  const carry = r.kind === "carryover";
   return el("div", {
-    class: "fin-cal-entry fin-cal-amt-" + r.direction + effect,
-    title: `${r.name} · ${fmtMoney(r.amount_cents)}` + (effect ? ` (${r.effect})` : ""),
-    text: r.name,
+    class: "fin-cal-entry fin-cal-amt-" + r.direction + effect + (carry ? " fin-cal-e-carry" : ""),
+    title: `${r.name} · ${fmtMoney(r.amount_cents)}`
+      + (carry ? ` (carried over from ${monthLabel(r.carried_from)})` : "")
+      + (r.effect === "deferred" ? ` (carried to ${monthLabel(r.deferred_to)})` : effect && !carry ? ` (${r.effect})` : ""),
+    text: (carry ? "↪ " : "") + r.name,
   });
 }
 
@@ -86,6 +155,8 @@ function renderCalendar(month, rows) {
 
   const [y, m] = month.split("-").map(Number);
   const byDay = new Map();
+  CAL_BY_DAY = byDay;
+  CAL_MONTH = month;
   const noDay = [];
   const addToDay = (d, r) => {
     if (!byDay.has(d)) byDay.set(d, []);
@@ -104,6 +175,15 @@ function renderCalendar(month, rows) {
       continue;
     }
     addToDay(r.day, r);
+  }
+
+  // Running total: month-to-date net (starts at $0 on the 1st) over every
+  // dated item, so a payday lifts it and the loans around it pull it down.
+  CAL_RUN = new Map();
+  let running = 0;
+  for (let d = 1; d <= new Date(y, m, 0).getDate(); d++) {
+    running += dayNet(byDay.get(d) || []);
+    CAL_RUN.set(d, running);
   }
 
   const head = el("div", { class: "fin-cal-head" });
@@ -140,13 +220,28 @@ function renderCalendar(month, rows) {
         }));
       }
       if (entries.length) {
-        const net = entries.reduce(
-          (s, r) => s + (r.direction === "in" ? r.amount_cents : -r.amount_cents),
-          0
-        );
+        cell.classList.add("fin-cal-clickable");
+        cell.setAttribute("role", "button");
+        cell.setAttribute("tabindex", "0");
+        cell.setAttribute("aria-label", `Details for day ${dayNum}`);
+        cell.addEventListener("click", () => openDayModal(dayNum));
+        cell.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            openDayModal(dayNum);
+          }
+        });
+        const net = dayNet(entries);
+        const run = CAL_RUN.get(dayNum);
         cell.appendChild(el("div", {
           class: "fin-cal-net " + (net < 0 ? "fin-net-neg" : "fin-net-pos"),
           text: fmtSignedMoney(net),
+          title: "Net for the day",
+        }));
+        cell.appendChild(el("div", {
+          class: "fin-cal-run " + (run < 0 ? "fin-net-neg" : "fin-net-pos"),
+          text: "Σ " + fmtSignedMoney(run),
+          title: "Running total for the month through this day",
         }));
       }
     }
@@ -154,12 +249,34 @@ function renderCalendar(month, rows) {
   }
   cal.appendChild(grid);
 
+  renderCarryNote(month, rows);
+
   if (noDay.length) {
     noDayEl.classList.remove("hidden");
-    noDayEl.textContent = "No set day: " + noDay.map((r) => r.name).join(", ");
+    noDayEl.textContent = "No set day (not in the running total): " + noDay.map((r) => r.name).join(", ");
   } else {
     noDayEl.classList.add("hidden");
   }
+}
+
+// One line under the calendar: what rolled in from last month, and what was
+// pushed to next month (neither is hidden in the lists - this is the summary).
+function renderCarryNote(month, rows) {
+  const note = document.getElementById("cal-carry");
+  const carriedIn = rows.filter((r) => r.kind === "carryover" && r.effect !== "deferred");
+  const pushed = rows.filter((r) => r.effect === "deferred");
+  const sum = (list) => list.reduce((s, r) => s + r.amount_cents, 0);
+  const parts = [];
+  if (carriedIn.length) {
+    parts.push(`Carried in from last month: ${carriedIn.length} item${carriedIn.length === 1 ? "" : "s"}, `
+      + `${fmtMoney(sum(carriedIn))} (counted this month)`);
+  }
+  if (pushed.length) {
+    parts.push(`Carried to ${monthLabel(pushed[0].deferred_to)}: ${pushed.length} item${pushed.length === 1 ? "" : "s"}, `
+      + `${fmtMoney(sum(pushed))} (not counted this month)`);
+  }
+  note.textContent = parts.join(" · ");
+  note.classList.toggle("hidden", !parts.length);
 }
 
 function totalsBlock(title, totals, { muted } = {}) {
@@ -364,6 +481,153 @@ initFilters().then(() => {
   render();
 });
 
+
+// --- day detail modal (click a calendar day) ---
+
+async function changeDeferral(dayNum, send) {
+  try {
+    await send();
+    await render();
+    openDayModal(dayNum);
+  } catch (err) {
+    Global.showMessage(err.message, "error");
+  }
+}
+
+// "Couldn't pay this" / "undo" buttons for one item in the day modal.
+function deferralActions(r, dayNum) {
+  const post = (body) => fetchJSON(`${API}/deferrals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const button = (text, onClick, cls = "") => el("button", {
+    type: "button", class: "fin-day-action " + cls, text, onclick: onClick,
+  });
+  const next = monthLabel(shiftMonthStr(CAL_MONTH, 1));
+
+  if (r.effect === "deferred" && r.deferral_id != null) {
+    return button(`Undo - I'll pay it in ${shortMonth(CAL_MONTH)}`, () =>
+      changeDeferral(dayNum, () => fetchJSON(`${API}/deferrals/${r.deferral_id}`, { method: "DELETE" })));
+  }
+  if (r.effect !== "normal" || r.direction !== "out") return null;
+  if (r.kind === "carryover") {
+    return button(`Couldn't pay this either - carry to ${next}`, () =>
+      changeDeferral(dayNum, () => post({ origin_id: r.carry_source_id })), "fin-day-action-warn");
+  }
+  if (r.kind === "recurring" && r.id > 0) {
+    return button(`Couldn't pay this - carry to ${next}`, () =>
+      changeDeferral(dayNum, () => post({ recurring_item_id: r.id, month: CAL_MONTH })), "fin-day-action-warn");
+  }
+  if (r.kind === "transaction") {
+    return button(`Couldn't pay this - carry to ${next}`, () =>
+      changeDeferral(dayNum, () => post({ transaction_id: r.id })), "fin-day-action-warn");
+  }
+  return null;
+}
+
+function shiftMonthStr(ym, delta) {
+  const [y, m] = ym.split("-").map(Number);
+  const idx = y * 12 + (m - 1) + delta;
+  return `${String(Math.floor(idx / 12)).padStart(4, "0")}-${String((idx % 12) + 1).padStart(2, "0")}`;
+}
+
+function dayItemBlock(r, dayNum) {
+  const isIn = r.direction === "in";
+  const weekly = r.frequency === "weekly" || r.frequency === "biweekly";
+  const head = el("div", { class: "fin-day-item-head" }, [
+    el("span", { class: "fin-day-item-name", text: r.name }),
+    el("span", { class: "fin-day-item-amt " + (isIn ? "fin-amount-in" : "fin-amount-out"),
+      text: (isIn ? "+" : "−") + fmtMoney(r.amount_cents) }),
+  ]);
+  const chips = [
+    r.kind === "carryover"
+      ? null
+      : el("span", { class: "fin-cadence", text: r.kind === "transaction" ? "One-time" : freqLabel(r.frequency) }),
+    categoryChip(r.category),
+    personBadge(r.person),
+  ].filter(Boolean);
+  if (r.kind === "carryover") {
+    chips.push(el("span", { class: "fin-tag fin-tag-carry", text: `carried over from ${monthLabel(r.carried_from)}` }));
+  }
+  if (r.effect === "deferred") {
+    chips.push(el("span", { class: "fin-tag fin-tag-deferred", text: `carried to ${monthLabel(r.deferred_to)}` }));
+  } else if (r.effect && r.effect !== "normal") {
+    chips.push(el("span", { class: "fin-tag fin-tag-" + (r.effect === "modified" ? "modified" : r.effect), text: r.effect }));
+  }
+  const details = [];
+  if (r.kind === "recurring") {
+    if (weekly && r.day_of_week != null) {
+      details.push(`${r.frequency === "biweekly" ? "Every other" : "Every"} ${WEEKDAY_NAMES[r.day_of_week]}, per payment`);
+    } else if (r.day != null) {
+      details.push(`Due on day ${r.day} of the month`);
+    }
+    if (r.start_month || r.end_month) {
+      details.push(
+        r.start_month && r.end_month ? `Runs ${monthLabel(r.start_month)} – ${monthLabel(r.end_month)}`
+        : r.end_month ? `Ends ${monthLabel(r.end_month)}` : `Started ${monthLabel(r.start_month)}`
+      );
+    }
+    if (r.reference_id) details.push(`Reference ID: ${r.reference_id}`);
+  } else {
+    if (r.account_name) details.push(`Account: ${r.account_name}`);
+  }
+  if (r.notes) details.push(`Notes: ${r.notes}`);
+
+  const action = deferralActions(r, dayNum);
+
+  return el("div", { class: "fin-day-item" + (r.effect === "deferred" ? " fin-day-item-deferred" : "") }, [
+    head,
+    el("div", { class: "fin-day-item-chips" }, chips),
+    ...details.map((d) => el("div", { class: "fin-day-item-detail", text: d })),
+    action,
+  ]);
+}
+
+function ordinal(n) {
+  const v = n % 100;
+  const suffix = ["th", "st", "nd", "rd"][(v - 20) % 10] || ["th", "st", "nd", "rd"][v] || "th";
+  return n + suffix;
+}
+
+function openDayModal(dayNum) {
+  const [y, m] = CAL_MONTH.split("-").map(Number);
+  const entries = (CAL_BY_DAY.get(dayNum) || [])
+    .slice()
+    .sort((a, b) => (a.direction === b.direction ? 0 : a.direction === "in" ? -1 : 1));
+  const live = entries.filter(countsInTotals);
+  const inTotal = live.filter((r) => r.direction === "in").reduce((s, r) => s + r.amount_cents, 0);
+  const outTotal = live.filter((r) => r.direction === "out").reduce((s, r) => s + r.amount_cents, 0);
+  const net = inTotal - outTotal;
+
+  document.getElementById("day-modal-title").textContent = new Date(y, m - 1, dayNum)
+    .toLocaleDateString(undefined, { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+  const body = document.getElementById("day-modal-body");
+  body.innerHTML = "";
+  body.appendChild(el("div", { class: "fin-day-summary" }, [
+    el("div", { class: "fin-day-net " + (net < 0 ? "fin-net-neg" : "fin-net-pos") }, [
+      el("span", { class: "fin-day-net-label", text: net < 0 ? "Net out" : "Net in" }),
+      el("span", { text: fmtMoney(Math.abs(net)) }),
+    ]),
+    el("div", { class: "fin-day-split" }, [
+      el("span", {}, ["In ", el("strong", { class: "fin-amount-in", text: fmtMoney(inTotal) })]),
+      el("span", {}, ["Out ", el("strong", { class: "fin-amount-out", text: fmtMoney(outTotal) })]),
+    ]),
+  ]));
+  const run = CAL_RUN.get(dayNum);
+  if (run != null) {
+    body.appendChild(el("div", { class: "fin-day-run" }, [
+      el("span", { text: `Running total for the month, through the ${ordinal(dayNum)}` }),
+      el("strong", {
+        class: run < 0 ? "fin-net-neg" : "fin-net-pos",
+        text: fmtSignedMoney(run),
+      }),
+    ]));
+  }
+  body.appendChild(el("div", { class: "fin-day-items" }, entries.map((r) => dayItemBlock(r, dayNum))));
+  Global.openModal("day-modal");
+}
 
 // --- "until next paycheck" card (always about today, not the month shown) ---
 

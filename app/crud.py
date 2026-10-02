@@ -5,6 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models, schemas
+from .services import deferrals
 
 # ---------------------------------------------------------------------------
 # People
@@ -176,6 +177,7 @@ def delete_recurring_item(db: Session, item_id: int) -> bool:
     db_item = get_recurring_item(db, item_id)
     if db_item is None:
         return False
+    deferrals.clear_for(db, recurring_item_id=item_id)
     db.delete(db_item)
     db.commit()
     return True
@@ -232,6 +234,7 @@ def delete_transaction(db: Session, txn_id: int) -> bool:
     db_txn = get_transaction(db, txn_id)
     if db_txn is None:
         return False
+    deferrals.clear_for(db, transaction_id=txn_id)
     db.delete(db_txn)
     db.commit()
     return True
@@ -259,6 +262,7 @@ def convert_transaction_to_recurring(db: Session, txn_id: int, opts: schemas.Con
         active=True,
     )
     db.add(item)
+    deferrals.clear_for(db, transaction_id=txn.id)
     db.delete(txn)
     db.commit()
     db.refresh(item)
@@ -281,6 +285,7 @@ def convert_recurring_to_transaction(db: Session, item_id: int, when):
         notes=item.notes,
     )
     db.add(txn)
+    deferrals.clear_for(db, recurring_item_id=item.id)
     db.delete(item)
     db.commit()
     db.refresh(txn)
@@ -406,6 +411,7 @@ def unsettle_trip(db: Session, trip_id: int):
     if s.settled_transaction_id is not None:
         txn = get_transaction(db, s.settled_transaction_id)
         if txn is not None:
+            deferrals.clear_for(db, transaction_id=txn.id)
             db.delete(txn)
     s.settled_at = None
     s.settled_transaction_id = None

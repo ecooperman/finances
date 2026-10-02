@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..models import FREQUENCY_INTERVAL_MONTHS, FREQUENCY_PER_MONTH
 from .funds import monthly_contribution_cents
-from .schedule import active_in_month, cadence_hits, occurrence_days
+from .schedule import active_in_month, cadence_hits, occurrence_days, shift_month
 from .trips import trip_forecasts
 from ..schemas import (
     Category,
@@ -76,12 +76,17 @@ def _passes_filters(
 
 def _row(kind, id_, name, amount_cents, direction, *, frequency=None, day=None,
          occurrence_days=None, face_amount_cents=None, category=None, person=None,
-         effect="normal", original_amount_cents=None) -> dict:
+         effect="normal", original_amount_cents=None, notes=None, reference_id=None,
+         account_name=None, start_month=None, end_month=None, day_of_week=None,
+         deferral_id=None, deferred_to=None, carried_from=None, carry_source_id=None) -> dict:
     return dict(
         kind=kind, id=id_, name=name, amount_cents=amount_cents, direction=direction,
         frequency=frequency, day=day, occurrence_days=occurrence_days,
         face_amount_cents=face_amount_cents, category=category, person=person,
-        effect=effect, original_amount_cents=original_amount_cents,
+        effect=effect, original_amount_cents=original_amount_cents, notes=notes,
+        reference_id=reference_id, account_name=account_name, start_month=start_month,
+        end_month=end_month, day_of_week=day_of_week, deferral_id=deferral_id,
+        deferred_to=deferred_to, carried_from=carried_from, carry_source_id=carry_source_id,
     )
 
 
@@ -108,7 +113,8 @@ def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
     """Recurring contributions for the month.
 
     normalized=False -> only items whose cadence lands this month, at their
-                        month's contribution (true cash flow).
+                        month's contribution (true cash flow). Weekly/biweekly
+                        items with a weekday set count once per real pay day.
     normalized=True  -> every active/in-bounds item, its smoothed per-month
                         figure.
     """
@@ -121,12 +127,20 @@ def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
             continue
         if not normalized and not cadence_hits(item.frequency, item.anchor_month, mon):
             continue
-        amount = _recurring_amount(item.frequency, item.amount_cents, normalized)
+        days = _weekly_days(item, year, mon)
+        if not normalized and days is not None:
+            # cash flow counts the real pay days (a 3-paycheck month is 3x)
+            amount = item.amount_cents * len(days)
+        else:
+            amount = _recurring_amount(item.frequency, item.amount_cents, normalized)
         rows.append(_row(
             "recurring", item.id, item.name, amount, item.direction,
             frequency=item.frequency, day=item.day_of_month,
-            occurrence_days=_weekly_days(item, year, mon),
+            occurrence_days=days,
             face_amount_cents=item.amount_cents,
+            notes=item.notes, reference_id=item.reference_id,
+            start_month=item.start_month, end_month=item.end_month,
+            day_of_week=item.day_of_week,
             category=_cat(item.category), person=_person(item.person),
         ))
     return rows
@@ -142,7 +156,8 @@ def _txn_rows(db, start, end, filters) -> List[dict]:
             continue
         rows.append(_row(
             "transaction", txn.id, txn.description, txn.amount_cents, txn.direction,
-            day=txn.date.day, category=_cat(txn.category), person=_person(txn.person),
+            day=txn.date.day, notes=txn.notes, account_name=txn.account_name,
+            category=_cat(txn.category), person=_person(txn.person),
         ))
     return rows
 
@@ -201,7 +216,7 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
                 if is_fund
                 else by_recurring_id.get(adj.target_recurring_id)
             )
-            if target is not None:
+            if target is not None and target["effect"] != "deferred":
                 target["effect"] = "removed"
 
         elif adj.kind == "modify":
@@ -210,13 +225,16 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
                 if is_fund
                 else by_recurring_id.get(adj.target_recurring_id)
             )
-            if target is None or target["effect"] == "removed":
+            if target is None or target["effect"] in ("removed", "deferred"):
                 continue
             original = target["amount_cents"]
             if adj.override_amount_cents is not None:
                 if is_fund:
                     # override is an annual amount; row holds the monthly set-aside
                     new_amount = round(adj.override_amount_cents / 12)
+                elif not normalized and target.get("occurrence_days") is not None:
+                    # cash flow: the override is per payment, paid on each real day
+                    new_amount = adj.override_amount_cents * len(target["occurrence_days"])
                 else:
                     # the row holds this month's contribution, not the face
                     # amount, so convert the override the same way.
@@ -260,6 +278,69 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
     return rows
 
 
+_UNCOUNTED = ("removed", "deferred")
+
+
+def _deferral_rows(db, month, filters, actual: List[dict]) -> List[dict]:
+    """Apply payment deferrals to this month's cash-flow rows.
+
+    - A recurring row whose payment was deferred this month is flagged
+      effect="deferred" (kept visible, excluded from the totals).
+    - Last month's unpaid payments appear as kind="carryover" lines on the
+      1st - counted, unless they were carried forward again.
+    """
+    deferrals = db.query(models.PaymentDeferral).filter(
+        models.PaymentDeferral.month.in_([month, shift_month(month, -1)])
+    ).all()
+    if not deferrals:
+        return actual
+    next_month = shift_month(month, 1)
+    this_month = [d for d in deferrals if d.month == month]
+    regular = {d.recurring_item_id: d for d in this_month
+               if d.origin_id is None and d.recurring_item_id is not None}
+    regular_txn = {d.transaction_id: d for d in this_month
+                   if d.origin_id is None and d.transaction_id is not None}
+    carried_on = {d.origin_id: d for d in this_month if d.origin_id is not None}
+
+    for r in actual:
+        d = None
+        if r["kind"] == "recurring":
+            d = regular.get(r["id"])
+        elif r["kind"] == "transaction":
+            d = regular_txn.get(r["id"])
+        if d is not None:
+            r["effect"] = "deferred"
+            r["deferral_id"] = d.id
+            r["deferred_to"] = next_month
+
+    extra = []
+    for d in deferrals:
+        if d.month != shift_month(month, -1):
+            continue
+        if d.transaction_id is not None:
+            src = db.get(models.Transaction, d.transaction_id)
+            name = src.description if src is not None else None
+            ref = None
+        else:
+            src = db.get(models.RecurringItem, d.recurring_item_id)
+            name = src.name if src is not None else None
+            ref = src.reference_id if src is not None else None
+        if src is None or not _passes_filters(src.person_id, src.category_id, *filters):
+            continue
+        child = carried_on.get(d.id)
+        extra.append(_row(
+            "carryover", d.id, name, d.amount_cents, src.direction,
+            day=1, face_amount_cents=d.amount_cents, notes=src.notes,
+            reference_id=ref, category=_cat(src.category),
+            person=_person(src.person), carried_from=d.original_month,
+            carry_source_id=d.id,
+            effect="deferred" if child else "normal",
+            deferral_id=child.id if child else None,
+            deferred_to=next_month if child else None,
+        ))
+    return actual + extra
+
+
 def _split_and_total(rows: List[dict]) -> tuple:
     money_in = sorted(
         [r for r in rows if r["direction"] == "in"],
@@ -269,8 +350,10 @@ def _split_and_total(rows: List[dict]) -> tuple:
         [r for r in rows if r["direction"] == "out"],
         key=lambda r: (r["day"] is None, r["day"] or 0, r["name"].lower()),
     )
-    in_cents = sum(r["amount_cents"] for r in money_in if r["effect"] != "removed")
-    out_cents = sum(r["amount_cents"] for r in money_out if r["effect"] != "removed")
+    # removed (scenario) and deferred (carried to next month) rows are shown
+    # but don't count toward this month.
+    in_cents = sum(r["amount_cents"] for r in money_in if r["effect"] not in _UNCOUNTED)
+    out_cents = sum(r["amount_cents"] for r in money_out if r["effect"] not in _UNCOUNTED)
     totals = MonthTotals(in_cents=in_cents, out_cents=out_cents, net_cents=in_cents - out_cents)
     return money_in, money_out, totals
 
@@ -301,6 +384,7 @@ def compute_month(
     actual = _recurring_rows(db, month, mon, filters, normalized=False) + _txn_rows(
         db, start, end, filters
     )
+    actual = _deferral_rows(db, month, filters, actual)
     # normalized = provisioning: lumpy recurrings smoothed + sinking-fund
     # set-asides + upcoming trips spread over the months until they happen.
     # One-offs are deliberately excluded - an unprovisioned surprise belongs

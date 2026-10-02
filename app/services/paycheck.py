@@ -16,7 +16,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from .. import models
-from .schedule import active_in_month, cadence_hits, occurrence_days
+from .schedule import active_in_month, cadence_hits, occurrence_days, shift_month
 
 HORIZON_DAYS = 62  # how far ahead to look for a paycheck
 
@@ -45,6 +45,32 @@ def dated_events(db: Session, start: date, end: date):
     events: List[dict] = []
     undated = {}
     items = db.query(models.RecurringItem).all()
+    items_by_id = {i.id: i for i in items}
+    deferrals = db.query(models.PaymentDeferral).all()
+    # payments marked "couldn't pay this month" are not due that month...
+    deferred = {(d.recurring_item_id, d.month) for d in deferrals
+                if d.origin_id is None and d.recurring_item_id is not None}
+    deferred_txns = {d.transaction_id for d in deferrals
+                     if d.origin_id is None and d.transaction_id is not None}
+    txn_ids = [d.transaction_id for d in deferrals if d.transaction_id is not None]
+    txns_by_id = (
+        {t.id: t for t in db.query(models.Transaction).filter(models.Transaction.id.in_(txn_ids))}
+        if txn_ids else {}
+    )
+    # ...they come back on the 1st of the next month, unless carried again.
+    carried_again = {d.origin_id for d in deferrals if d.origin_id is not None}
+    for d in deferrals:
+        item = (txns_by_id.get(d.transaction_id) if d.transaction_id is not None
+                else items_by_id.get(d.recurring_item_id))
+        name = getattr(item, "description", None) or getattr(item, "name", None)
+        y, m = (int(p) for p in shift_month(d.month, 1).split("-"))
+        when = date(y, m, 1)
+        if item is not None and d.id not in carried_again and start <= when <= end:
+            events.append({
+                **_payment(when, name, d.amount_cents, "carryover"),
+                "direction": item.direction,
+                "person_id": item.person_id,
+            })
 
     for year, mon in _months_between(start, end):
         month = f"{year:04d}-{mon:02d}"
@@ -52,6 +78,8 @@ def dated_events(db: Session, start: date, end: date):
             if not active_in_month(item, month):
                 continue
             if not cadence_hits(item.frequency, item.anchor_month, mon):
+                continue
+            if (item.id, month) in deferred:
                 continue
             days = occurrence_days(
                 item.frequency, item.day_of_month, item.day_of_week, item.week_anchor, year, mon
@@ -74,6 +102,8 @@ def dated_events(db: Session, start: date, end: date):
         .all()
     )
     for t in txns:
+        if t.id in deferred_txns:
+            continue
         events.append({
             **_payment(t.date, t.description, t.amount_cents, "transaction"),
             "direction": t.direction,

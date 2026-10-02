@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from .config import SHARED_ASSETS_BASE
 from .routers import (
     categories,
+    deferrals,
     funds,
     monthly,
     paycheck,
@@ -97,6 +98,7 @@ app.include_router(trips.router)
 app.include_router(scenarios.router)
 app.include_router(monthly.router)
 app.include_router(paycheck.router)
+app.include_router(deferrals.router)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

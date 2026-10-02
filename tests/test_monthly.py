@@ -129,11 +129,36 @@ def test_weekly_pay_days_and_face_amount_reach_the_month_row(db):
     row = next(r for r in compute_month(db, "2026-10").money_in if r.name == "Paycheck")
     assert row.occurrence_days == [2, 16, 30]
     assert row.face_amount_cents == 600_000
-    assert row.amount_cents == round(600_000 * 26 / 12)  # smoothed month figure
+    assert row.amount_cents == 3 * 600_000  # cash flow: three real paydays
+    res = compute_month(db, "2026-10")
+    assert res.totals.in_cents == 3 * 600_000
+    assert res.normalized.in_cents == round(600_000 * 26 / 12)  # provisioning stays smoothed
     # day_of_week must be 0-6
     with pytest.raises(Exception):
         schemas.RecurringItemCreate(name="x", amount_cents=1, direction="out",
                                     frequency="weekly", day_of_week=9)
+
+
+def test_cash_flow_follows_real_pay_days_but_undated_stays_smoothed(db):
+    # Fridays in Aug 2026: 7, 14, 21, 28 (4); Sep 2026: 4, 11, 18, 25 (4); Oct: 2, 9, 16, 23, 30 (5)
+    _recurring(db, name="Cleaner", amount_cents=10_000, direction="out", frequency="weekly", day_of_week=5)
+    _recurring(db, name="Gym", amount_cents=5_000, direction="out", frequency="weekly")  # no weekday
+    aug = compute_month(db, "2026-08")
+    oct_ = compute_month(db, "2026-10")
+    assert aug.totals.out_cents == 4 * 10_000 + round(5_000 * 52 / 12)
+    assert oct_.totals.out_cents == 5 * 10_000 + round(5_000 * 52 / 12)
+    # provisioning is the same smoothed figure every month
+    assert aug.normalized.out_cents == oct_.normalized.out_cents
+
+
+def test_scenario_override_pays_per_real_pay_day(db):
+    item = _recurring(db, name="Paycheck", amount_cents=100_000, direction="in",
+                      frequency="biweekly", day_of_week=5, week_anchor=date(2026, 10, 2))
+    scenario = _scenario(db, dict(kind="modify", target_recurring_id=item.id, override_amount_cents=200_000))
+    res = compute_month(db, "2026-10", scenario_id=scenario.id)
+    row = next(r for r in res.scenario.money_in if r.name == "Paycheck")
+    assert row.amount_cents == 3 * 200_000  # Oct 2, 16, 30
+    assert row.face_amount_cents == 200_000
 
 
 def test_weekly_every_matching_weekday_and_undated_has_none(db):

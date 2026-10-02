@@ -16,6 +16,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -244,6 +245,45 @@ class TripSettlement(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class PaymentDeferral(Base):
+    """A payment that wasn't made in `month` and rolls into the next one.
+
+    One row = "this amount went unpaid in <month>" (a recurring item's
+    payment, or a one-off transaction). The next month then shows
+    it as a carried-over line (dated the 1st). If that is *also* not paid,
+    "carry again" adds a child row (`origin_id` -> the row it continues,
+    `month` = the following month) so the debt keeps rolling; a carried line
+    with no child row counts as paid in its month. `original_month` is the
+    month it was first due. Cash flow only - provisioning ignores deferrals.
+    """
+
+    __tablename__ = "payment_deferrals"
+    __table_args__ = (
+        UniqueConstraint("origin_id", name="uq_payment_deferrals_origin_id"),
+        # exactly one of recurring_item_id / transaction_id is set
+        CheckConstraint(
+            "(recurring_item_id IS NOT NULL) + (transaction_id IS NOT NULL) = 1",
+            name="ck_payment_deferrals_one_target",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True)
+    recurring_item_id = Column(
+        Integer, ForeignKey("recurring_items.id", ondelete="CASCADE"), nullable=True
+    )
+    transaction_id = Column(
+        Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=True
+    )
+    month = Column(String, nullable=False)  # "YYYY-MM" it went unpaid in
+    original_month = Column(String, nullable=False)  # "YYYY-MM" it was first due
+    amount_cents = Column(Integer, nullable=False)
+    origin_id = Column(
+        Integer, ForeignKey("payment_deferrals.id", ondelete="CASCADE"), nullable=True
+    )
+
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class Scenario(Base):

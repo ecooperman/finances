@@ -69,3 +69,10 @@ def occurrence_days(
     if day_of_month is None:
         return None
     return [min(day_of_month, last)]  # day 31 in a 30-day month -> the 30th
+
+
+def shift_month(month: str, delta: int) -> str:
+    """"YYYY-MM" moved by `delta` months (negative = earlier)."""
+    y, m = (int(p) for p in month.split("-"))
+    idx = y * 12 + (m - 1) + delta
+    return f"{idx // 12:04d}-{idx % 12 + 1:02d}"

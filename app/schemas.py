@@ -13,7 +13,7 @@ returned untouched).
 from datetime import date as date_type, datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Direction = Literal["in", "out"]
 Frequency = Literal["weekly", "biweekly", "monthly", "quarterly", "semiannual", "annual"]
@@ -398,7 +398,7 @@ class DatedPayment(BaseModel):
     date: date_type
     name: str
     amount_cents: int  # the real per-payment amount, not smoothed
-    kind: Literal["recurring", "transaction"]
+    kind: Literal["recurring", "transaction", "carryover"]
 
 
 class UndatedItem(BaseModel):
@@ -550,7 +550,7 @@ class Scenario(ScenarioBase):
 
 
 class MonthRow(BaseModel):
-    kind: Literal["recurring", "transaction", "fund", "trip"]
+    kind: Literal["recurring", "transaction", "fund", "trip", "carryover"]
     id: int
     name: str
     amount_cents: int
@@ -563,12 +563,27 @@ class MonthRow(BaseModel):
     # on - the calendar draws one entry per day at the face amount.
     face_amount_cents: Optional[int] = None
     occurrence_days: Optional[List[int]] = None
+    # Line-item details shown when you click a day on the calendar.
+    notes: Optional[str] = None
+    reference_id: Optional[str] = None
+    account_name: Optional[str] = None
+    start_month: Optional[str] = None
+    end_month: Optional[str] = None
+    day_of_week: Optional[int] = None  # 0=Sun..6=Sat, weekly/biweekly
     category: Optional[Category] = None
     person: Optional[Person] = None
     # "normal" for real rows; "added"/"removed"/"modified" when a scenario
     # is applied so the UI can tint them.
-    effect: Literal["normal", "added", "removed", "modified"] = "normal"
+    effect: Literal["normal", "added", "removed", "modified", "deferred"] = "normal"
     original_amount_cents: Optional[int] = None
+    # Payment deferrals ("couldn't pay this month"). effect="deferred" rows
+    # carry `deferral_id` (to undo) and `deferred_to` (the month it rolled
+    # into). kind="carryover" rows are last month's unpaid items: `carried_from`
+    # is the month first due, `carry_source_id` the deferral to carry again.
+    deferral_id: Optional[int] = None
+    deferred_to: Optional[str] = None
+    carried_from: Optional[str] = None
+    carry_source_id: Optional[int] = None
 
 
 class MonthTotals(BaseModel):
@@ -594,3 +609,42 @@ class ScenarioMonthResult(MonthSide):
 class MonthResult(MonthSide):
     month: str
     scenario: Optional[ScenarioMonthResult] = None
+
+
+# --- payment deferrals ("couldn't pay this month") -----------------------
+
+
+class DeferralCreate(BaseModel):
+    """Defer a recurring item's payment in a month (`recurring_item_id` +
+    `month`), defer a one-off (`transaction_id`), or carry an already-carried
+    line forward again (`origin_id`). Exactly one of the three."""
+
+    recurring_item_id: Optional[int] = None
+    month: Optional[str] = Field(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    transaction_id: Optional[int] = None
+    origin_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _one_form(self):
+        forms = [
+            self.recurring_item_id is not None and self.month is not None,
+            self.transaction_id is not None and self.recurring_item_id is None,
+            self.origin_id is not None,
+        ]
+        if sum(forms) != 1 or (self.month is not None and self.recurring_item_id is None):
+            raise ValueError(
+                "give exactly one of: recurring_item_id + month, transaction_id, origin_id"
+            )
+        return self
+
+
+class DeferralOut(BaseModel):
+    id: int
+    recurring_item_id: Optional[int] = None
+    transaction_id: Optional[int] = None
+    month: str
+    original_month: str
+    amount_cents: int
+    origin_id: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
