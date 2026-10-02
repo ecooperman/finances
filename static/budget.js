@@ -173,13 +173,28 @@ function readRecurring(scope) {
   };
 }
 
+// An active recurring item with nothing to place it on the calendar: weekly/
+// biweekly need a day of the week, everything else a day of the month. These
+// are skipped by the calendar and the "until next paycheck" total, so we
+// flag them (mirrors schedule.occurrence_days returning None).
+function isUndatedRecurring(item) {
+  if (!item.active) return false;
+  return isWeeklyFreq(item.frequency) ? item.day_of_week == null : item.day_of_month == null;
+}
+
 function recurringCard(item) {
-  const wrap = el("div", { class: "item-card" + (item.active ? "" : " archived") });
+  const undated = isUndatedRecurring(item);
+  const wrap = el("div", {
+    class: "item-card" + (item.active ? "" : " archived") + (undated ? " fin-undated" : ""),
+  });
   const summary = el("button", { class: "item-summary", type: "button", "aria-expanded": "false" }, [
     el("span", { class: "fin-item-icon", "data-icon": "repeat", "aria-hidden": "true" }),
     el("span", { class: "item-summary-title", text: item.name }),
     item.frequency !== "monthly" ? el("span", { class: "fin-cadence", text: freqLabel(item.frequency) }) : null,
     !item.active ? el("span", { class: "fin-tag fin-tag-removed", text: "paused" }) : null,
+    undated
+      ? el("span", { class: "fin-tag fin-tag-nodate", text: isWeeklyFreq(item.frequency) ? "no weekday" : "no day" })
+      : null,
     el("span", { class: "fin-item-amount fin-amount-" + item.direction, text: fmtMoney(item.amount_cents) }),
     el("span", { class: "item-chevron", "aria-hidden": "true", text: "▸" }),
   ]);
@@ -577,7 +592,9 @@ async function loadRecurring() {
   recurringList.innerHTML = "";
   items.forEach((i) => recurringList.appendChild(recurringCard(i)));
   recurringEmpty.classList.toggle("hidden", items.length > 0);
-  recurringCount.textContent = `${items.length} item${items.length === 1 ? "" : "s"}`;
+  const noDay = items.filter(isUndatedRecurring).length;
+  recurringCount.textContent =
+    `${items.length} item${items.length === 1 ? "" : "s"}` + (noDay ? ` · ${noDay} without a day` : "");
 }
 
 async function loadOnetime() {

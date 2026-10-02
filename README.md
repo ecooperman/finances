@@ -203,6 +203,14 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   `day_of_month` (and weekly/biweekly, and scenario-added lines) go in a
   "No set day" line under the grid. No backend involved -
   `renderCalendar()` in `static/app.js`.
+- **Until next paycheck** (Overview, top card): `GET /api/until-paycheck`
+  (`app/services/paycheck.py`) walks the real dated payments - recurring
+  items placed by `schedule.py`, plus one-off transactions - from today to
+  the next dated income (optionally one person's), at face amounts. Shows
+  what's left to pay before it, what's also due on payday itself, and lists
+  recurring money-out items it *can't* place (monthly with no day, weekly
+  with no weekday) rather than silently under-counting. A paycheck landing
+  today counts as already received.
 - **Recurring frequencies**: `weekly`, `biweekly`, `monthly`, `quarterly`,
   `semiannual`, `annual`.
   - *quarterly / semi-annual / annual* need an `anchor_month`; they hit the
@@ -211,10 +219,13 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   - *weekly / biweekly* need no month anchor. The totals use a **smoothed**
     amount (`face × 52/12` or `× 26/12`), same figure in cash-flow and
     provisioning. If you set a **day of week**, the payment calendar draws
-    one entry per occurrence with the smoothed monthly amount split across
-    them (so day-nets still sum to the smoothed figure); biweekly also
-    takes an optional **anchor date** to fix the every-14-days phase (no
-    anchor → every other matching weekday from the first one in the month).
+    one entry per real pay day at the **real per-payment amount** (a $6,000
+    biweekly paycheck shows +$6,000 on each payday - not the smoothed
+    monthly share), so a month's calendar can add up to more or less than
+    its smoothed total. Biweekly also takes an optional **anchor date** to
+    fix the every-14-days phase (no anchor → every other matching weekday
+    from the first one in the month). `app/services/schedule.py` is the
+    single source of truth for which days an item pays on.
   - See `FREQUENCY_PER_MONTH` / `FREQUENCY_INTERVAL_MONTHS` in
     `app/models.py` and `_recurring_amount` in `app/services/monthly.py`.
 - **Funds** always contribute their flat `annual / 12` to provisioning,

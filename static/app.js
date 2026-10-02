@@ -92,18 +92,12 @@ function renderCalendar(month, rows) {
     byDay.get(d).push(r);
   };
   for (const r of rows) {
-    // weekly / biweekly with a chosen weekday: one entry per occurrence,
-    // the smoothed monthly amount split across them (totals stay the same).
-    if (isWeeklyFreq(r.frequency) && r.day_of_week != null) {
-      const occ = weekdayOccurrences(y, m, r.day_of_week, r.week_anchor, r.frequency === "biweekly");
-      if (occ.length) {
-        const per = Math.round(r.amount_cents / occ.length);
-        occ.forEach((d, i) => {
-          const amt = i === occ.length - 1 ? r.amount_cents - per * (occ.length - 1) : per;
-          addToDay(d, { ...r, amount_cents: amt, day: d });
-        });
-        continue;
-      }
+    // weekly / biweekly with a weekday set: the server gives the real pay
+    // days; each shows the real per-payment amount (not the smoothed one).
+    if (r.occurrence_days && r.occurrence_days.length) {
+      const amt = r.face_amount_cents != null ? r.face_amount_cents : r.amount_cents;
+      for (const d of r.occurrence_days) addToDay(d, { ...r, amount_cents: amt, day: d });
+      continue;
     }
     if (r.day == null) {
       noDay.push(r);
@@ -256,6 +250,7 @@ async function render() {
     inCount.textContent = `${inRows.length} item${inRows.length === 1 ? "" : "s"}`;
     outCount.textContent = `${outRows.length} item${outRows.length === 1 ? "" : "s"}`;
     renderTotals(data);
+    loadPaycheck();
   } catch (err) {
     Global.showMessage(err.message, "error");
   }
@@ -368,3 +363,81 @@ initFilters().then(() => {
   buildAddForm();
   render();
 });
+
+
+// --- "until next paycheck" card (always about today, not the month shown) ---
+
+const paycheckPersonSelect = document.getElementById("paycheck-person");
+const paycheckBody = document.getElementById("paycheck-body");
+
+function localISODate(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function fmtLongDate(iso) {
+  const [yy, mm, dd] = iso.split("-").map(Number);
+  return new Date(yy, mm - 1, dd).toLocaleDateString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+  });
+}
+
+async function loadPaycheck() {
+  const p = new URLSearchParams({ on: localISODate() });
+  if (paycheckPersonSelect.value) p.set("person_id", paycheckPersonSelect.value);
+  let d;
+  try {
+    d = await fetchJSON(`${API}/until-paycheck?${p.toString()}`);
+  } catch (err) {
+    paycheckBody.textContent = "Couldn't load the paycheck lookahead.";
+    return;
+  }
+  paycheckBody.innerHTML = "";
+
+  if (!d.next_paycheck) {
+    paycheckBody.appendChild(el("p", { class: "empty-state", text:
+      "No upcoming paycheck found. Give an income item a day (monthly) or a day of the week (weekly/biweekly) and it will show up here." }));
+    return;
+  }
+  const nx = d.next_paycheck;
+  const when = nx.days_away === 1 ? "tomorrow" : `in ${nx.days_away} days`;
+  paycheckBody.appendChild(el("div", { class: "fin-paycheck-next" }, [
+    el("span", { text: `Next: ${nx.name} · ${fmtLongDate(nx.date)} (${when}) · ` }),
+    el("strong", { class: "fin-amount-in", text: `+${fmtMoney(nx.amount_cents)}` }),
+  ]));
+
+  paycheckBody.appendChild(el("div", { class: "fin-paycheck-total" }, [
+    el("div", { class: "fin-paycheck-big fin-amount-out", text: fmtMoney(d.before_total_cents) }),
+    el("div", { class: "fin-paycheck-label", text: "left to pay before then" }),
+  ]));
+  if (d.on_payday.length) {
+    paycheckBody.appendChild(el("div", { class: "fin-paycheck-sub", text:
+      `+ ${fmtMoney(d.on_payday_total_cents)} also due on payday (${d.on_payday.map((e) => e.name).join(", ")})` }));
+  }
+
+  if (d.before.length) {
+    const list = el("div", { class: "fin-paycheck-list" });
+    for (const e of d.before) {
+      list.appendChild(el("div", { class: "fin-paycheck-row" }, [
+        el("span", { class: "fin-paycheck-date", text: fmtLongDate(e.date) }),
+        el("span", { class: "fin-paycheck-name", text: e.name }),
+        el("span", { class: "fin-amount-out", text: fmtMoney(e.amount_cents) }),
+      ]));
+    }
+    paycheckBody.appendChild(el("details", { class: "fin-paycheck-details" }, [
+      el("summary", { text: `${d.before.length} payment${d.before.length === 1 ? "" : "s"}` }),
+      list,
+    ]));
+  }
+
+  if (d.undated.length) {
+    paycheckBody.appendChild(el("p", { class: "fin-paycheck-warn", text:
+      `Not counted (no day set): ${d.undated.map((u) => u.name).join(", ")}.` }));
+  }
+}
+
+async function initPaycheck() {
+  const people = await loadPeople();
+  fillSelect(paycheckPersonSelect, people.map((x) => ({ value: x.id, label: `${x.name}'s` })), { blankLabel: "Anyone's" });
+  paycheckPersonSelect.addEventListener("change", loadPaycheck);
+}
+initPaycheck();

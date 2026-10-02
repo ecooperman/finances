@@ -660,3 +660,117 @@
     font-size: 9px;
   }
 }
+
+/* --- "until next paycheck" card (Overview, top) --- */
+
+.fin-paycheck {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.fin-paycheck-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.fin-paycheck-head h2 {
+  margin: 0;
+}
+
+.fin-paycheck-who {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.fin-paycheck-who select {
+  width: auto;
+  padding: 4px 8px;
+  font-size: 13px;
+}
+
+.fin-paycheck-next {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.fin-paycheck-big {
+  font-size: 30px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  margin-top: 8px;
+}
+
+.fin-paycheck-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fin-paycheck-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.fin-paycheck-details {
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.fin-paycheck-details summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.fin-paycheck-row {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-paycheck-date {
+  flex: 0 0 90px;
+  color: var(--muted);
+}
+
+.fin-paycheck-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fin-paycheck-warn {
+  font-size: 12px;
+  color: var(--warning);
+  background: var(--warning-bg);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 10px 0 0;
+}
+
+/* --- recurring items with no day/weekday set (Budget) --- */
+
+.item-card.fin-undated {
+  background: var(--warning-bg);
+  border-color: var(--warning);
+}
+
+.fin-tag-nodate {
+  background: #fff;
+  color: var(--warning);
+  border: 1px solid var(--warning);
+}

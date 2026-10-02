@@ -390,6 +390,41 @@ class TripsSummary(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# "Until the next paycheck" lookahead
+# ---------------------------------------------------------------------------
+
+
+class DatedPayment(BaseModel):
+    date: date_type
+    name: str
+    amount_cents: int  # the real per-payment amount, not smoothed
+    kind: Literal["recurring", "transaction"]
+
+
+class UndatedItem(BaseModel):
+    name: str
+    amount_cents: int
+    frequency: str
+
+
+class NextPaycheck(BaseModel):
+    date: date_type
+    name: str
+    amount_cents: int
+    days_away: int
+
+
+class UntilPaycheck(BaseModel):
+    as_of: date_type
+    next_paycheck: Optional[NextPaycheck] = None
+    before: List[DatedPayment] = []  # money out from today up to the day before payday
+    before_total_cents: int = 0
+    on_payday: List[DatedPayment] = []  # money out dated the paycheck day itself
+    on_payday_total_cents: int = 0
+    undated: List[UndatedItem] = []  # recurring money-out we couldn't place on a date
+
+
+# ---------------------------------------------------------------------------
 # Scenarios
 # ---------------------------------------------------------------------------
 
@@ -522,9 +557,12 @@ class MonthRow(BaseModel):
     direction: Direction
     frequency: Optional[str] = None
     day: Optional[int] = None
-    # weekly/biweekly only - lets the calendar place one entry per occurrence.
-    day_of_week: Optional[int] = None
-    week_anchor: Optional[str] = None
+    # Per-payment amount (what actually leaves/arrives each time), vs
+    # amount_cents which is this month's smoothed contribution. And, for
+    # weekly/biweekly with a weekday set, the real days of the month it pays
+    # on - the calendar draws one entry per day at the face amount.
+    face_amount_cents: Optional[int] = None
+    occurrence_days: Optional[List[int]] = None
     category: Optional[Category] = None
     person: Optional[Person] = None
     # "normal" for real rows; "added"/"removed"/"modified" when a scenario

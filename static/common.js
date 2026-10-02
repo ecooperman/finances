@@ -96,26 +96,6 @@ const MONTH_NAMES = [
 ];
 const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-// Day-of-month numbers a weekly/biweekly item falls on within `month` (1-12).
-// everyOther=true (biweekly): keep the every-14-days phase from `anchorISO`
-// if given, else every other matching weekday from the first one this month.
-function weekdayOccurrences(year, month, dow, anchorISO, everyOther) {
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const days = [];
-  for (let d = 1; d <= daysInMonth; d++) {
-    if (new Date(year, month - 1, d).getDay() === dow) days.push(d);
-  }
-  if (!everyOther) return days;
-  if (anchorISO) {
-    const anchor = new Date(anchorISO + "T00:00:00");
-    return days.filter((d) => {
-      const diff = Math.round((new Date(year, month - 1, d) - anchor) / 86400000);
-      return diff % 14 === 0;
-    });
-  }
-  return days.filter((_, i) => i % 2 === 0);
-}
-
 function freqLabel(freq) {
   return FREQ_LABELS[freq] || freq || "";
 }

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..models import FREQUENCY_INTERVAL_MONTHS, FREQUENCY_PER_MONTH
 from .funds import monthly_contribution_cents
+from .schedule import active_in_month, cadence_hits, occurrence_days
 from .trips import trip_forecasts
 from ..schemas import (
     Category,
@@ -40,18 +41,6 @@ def _month_parts(month: str):
     return year, mon, start, end
 
 
-def _cadence_hits(frequency: str, anchor_month: Optional[int], mon: int) -> bool:
-    """Does a recurring item with this cadence land in calendar month `mon`?
-    Weekly/biweekly/monthly land every month; the sub-monthly ones only in
-    their anchor month(s)."""
-    interval = FREQUENCY_INTERVAL_MONTHS.get(frequency)
-    if interval is None:
-        return True
-    if anchor_month is None:  # sub-monthly item with no anchor - treat as not landing
-        return False
-    return (mon - anchor_month) % interval == 0
-
-
 def _recurring_amount(frequency: str, face_cents: int, normalized: bool) -> int:
     """The amount a recurring item contributes to one month.
 
@@ -64,16 +53,6 @@ def _recurring_amount(frequency: str, face_cents: int, normalized: bool) -> int:
     if not normalized and frequency in FREQUENCY_INTERVAL_MONTHS:
         return face_cents
     return round(face_cents * FREQUENCY_PER_MONTH.get(frequency, 1.0))
-
-
-def _active_in_month(item: models.RecurringItem, month: str) -> bool:
-    if not item.active:
-        return False
-    if item.start_month and item.start_month > month:
-        return False
-    if item.end_month and item.end_month < month:
-        return False
-    return True
 
 
 def _passes_filters(
@@ -96,13 +75,13 @@ def _passes_filters(
 
 
 def _row(kind, id_, name, amount_cents, direction, *, frequency=None, day=None,
-         day_of_week=None, week_anchor=None, category=None, person=None,
+         occurrence_days=None, face_amount_cents=None, category=None, person=None,
          effect="normal", original_amount_cents=None) -> dict:
     return dict(
         kind=kind, id=id_, name=name, amount_cents=amount_cents, direction=direction,
-        frequency=frequency, day=day, day_of_week=day_of_week, week_anchor=week_anchor,
-        category=category, person=person, effect=effect,
-        original_amount_cents=original_amount_cents,
+        frequency=frequency, day=day, occurrence_days=occurrence_days,
+        face_amount_cents=face_amount_cents, category=category, person=person,
+        effect=effect, original_amount_cents=original_amount_cents,
     )
 
 
@@ -114,6 +93,17 @@ def _person(obj):
     return Person.model_validate(obj) if obj is not None else None
 
 
+def _weekly_days(item, year: int, mon: int):
+    """Real pay days this month for a weekly/biweekly item (None if it
+    isn't one, or has no weekday set) - the calendar draws one entry per
+    day at the item's face amount."""
+    if item.frequency not in ("weekly", "biweekly"):
+        return None
+    return occurrence_days(
+        item.frequency, item.day_of_month, item.day_of_week, item.week_anchor, year, mon
+    )
+
+
 def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
     """Recurring contributions for the month.
 
@@ -123,19 +113,20 @@ def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
                         figure.
     """
     rows = []
+    year = int(month[:4])
     for item in db.query(models.RecurringItem).all():
-        if not _active_in_month(item, month):
+        if not active_in_month(item, month):
             continue
         if not _passes_filters(item.person_id, item.category_id, *filters):
             continue
-        if not normalized and not _cadence_hits(item.frequency, item.anchor_month, mon):
+        if not normalized and not cadence_hits(item.frequency, item.anchor_month, mon):
             continue
         amount = _recurring_amount(item.frequency, item.amount_cents, normalized)
         rows.append(_row(
             "recurring", item.id, item.name, amount, item.direction,
             frequency=item.frequency, day=item.day_of_month,
-            day_of_week=item.day_of_week,
-            week_anchor=item.week_anchor.isoformat() if item.week_anchor else None,
+            occurrence_days=_weekly_days(item, year, mon),
+            face_amount_cents=item.amount_cents,
             category=_cat(item.category), person=_person(item.person),
         ))
     return rows
@@ -239,6 +230,12 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
             target["amount_cents"] = new_amount
             target["original_amount_cents"] = original
             target["effect"] = "modified"
+            # keep the per-payment (calendar) amount in step with the change
+            if not is_fund and target.get("face_amount_cents") is not None:
+                if adj.override_amount_cents is not None:
+                    target["face_amount_cents"] = adj.override_amount_cents
+                else:
+                    target["face_amount_cents"] = round(target["face_amount_cents"] * adj.multiplier)
 
         elif adj.kind == "add":
             if not _passes_filters(adj.person_id, adj.category_id, *filters):
@@ -252,13 +249,13 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
                 ))
             else:
                 freq = adj.frequency or "monthly"
-                if not normalized and not _cadence_hits(freq, adj.anchor_month, mon):
+                if not normalized and not cadence_hits(freq, adj.anchor_month, mon):
                     continue
                 amount = _recurring_amount(freq, adj.amount_cents, normalized)
                 rows.append(_row(
                     "recurring", -adj.id, adj.name, amount, adj.direction,
-                    frequency=freq, day=None, category=_cat(cat), person=_person(per),
-                    effect="added",
+                    frequency=freq, day=None, face_amount_cents=adj.amount_cents,
+                    category=_cat(cat), person=_person(per), effect="added",
                 ))
     return rows
 

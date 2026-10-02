@@ -11,6 +11,7 @@ from .routers import (
     categories,
     funds,
     monthly,
+    paycheck,
     people,
     recurring,
     scenarios,
@@ -95,6 +96,7 @@ app.include_router(funds.router)
 app.include_router(trips.router)
 app.include_router(scenarios.router)
 app.include_router(monthly.router)
+app.include_router(paycheck.router)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

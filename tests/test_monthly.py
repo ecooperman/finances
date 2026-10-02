@@ -121,18 +121,36 @@ def test_weekly_needs_no_anchor_but_quarterly_still_does(db):
         schemas.RecurringItemCreate(name="q", amount_cents=1, direction="out", frequency="quarterly")
 
 
-def test_day_of_week_flows_to_the_month_row(db):
-    _recurring(db, name="Cleaner", amount_cents=10_000, direction="out",
-               frequency="weekly", day_of_week=5, week_anchor=date(2026, 8, 7))
-    row = next(r for r in compute_month(db, "2026-09").money_out if r.name == "Cleaner")
-    assert row.day_of_week == 5
-    assert row.week_anchor == "2026-08-07"  # ISO string for the frontend
+def test_weekly_pay_days_and_face_amount_reach_the_month_row(db):
+    # Friday biweekly, anchored 2026-10-02 -> Oct 2, 16, 30; the row carries
+    # the real $6,000 per payment even though the month figure is smoothed.
+    _recurring(db, name="Paycheck", amount_cents=600_000, direction="in",
+               frequency="biweekly", day_of_week=5, week_anchor=date(2026, 10, 2))
+    row = next(r for r in compute_month(db, "2026-10").money_in if r.name == "Paycheck")
+    assert row.occurrence_days == [2, 16, 30]
+    assert row.face_amount_cents == 600_000
+    assert row.amount_cents == round(600_000 * 26 / 12)  # smoothed month figure
     # day_of_week must be 0-6
     with pytest.raises(Exception):
         schemas.RecurringItemCreate(name="x", amount_cents=1, direction="out",
                                     frequency="weekly", day_of_week=9)
 
 
+def test_weekly_every_matching_weekday_and_undated_has_none(db):
+    _recurring(db, name="Cleaner", amount_cents=10_000, direction="out", frequency="weekly", day_of_week=5)
+    _recurring(db, name="Gym", amount_cents=5_000, direction="out", frequency="weekly")
+    rows = {r.name: r for r in compute_month(db, "2026-08").money_out}
+    assert rows["Cleaner"].occurrence_days == [7, 14, 21, 28]
+    assert rows["Gym"].occurrence_days is None  # no weekday -> "No set day"
+
+
+def test_scenario_scale_keeps_the_per_payment_amount_in_step(db):
+    item = _recurring(db, name="Paycheck", amount_cents=100_000, direction="in",
+                      frequency="biweekly", day_of_week=5, week_anchor=date(2026, 10, 2))
+    scenario = _scenario(db, dict(kind="modify", target_recurring_id=item.id, multiplier=0.5))
+    res = compute_month(db, "2026-10", scenario_id=scenario.id)
+    row = next(r for r in res.scenario.money_in if r.name == "Paycheck")
+    assert row.face_amount_cents == 50_000
 def test_start_and_end_month_bounds(db):
     _recurring(db, name="Car loan", amount_cents=45_000, direction="out", start_month="2026-03", end_month="2026-05")
     assert compute_month(db, "2026-02").totals.out_cents == 0
