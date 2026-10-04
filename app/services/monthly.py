@@ -21,7 +21,8 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..models import FREQUENCY_INTERVAL_MONTHS, FREQUENCY_PER_MONTH
 from .funds import monthly_contribution_cents
-from .schedule import active_in_month, cadence_hits, occurrence_days, shift_month
+from . import daily as daily_svc
+from .schedule import active_in_month, cadence_hits, daily_amounts, occurrence_days, shift_month
 from .trips import trip_forecasts
 from ..schemas import (
     Category,
@@ -78,7 +79,8 @@ def _row(kind, id_, name, amount_cents, direction, *, frequency=None, day=None,
          occurrence_days=None, face_amount_cents=None, category=None, person=None,
          effect="normal", original_amount_cents=None, notes=None, reference_id=None,
          account_name=None, start_month=None, end_month=None, day_of_week=None,
-         deferral_id=None, deferred_to=None, carried_from=None, carry_source_id=None) -> dict:
+         deferral_id=None, deferred_to=None, carried_from=None, carry_source_id=None,
+         daily=None) -> dict:
     return dict(
         kind=kind, id=id_, name=name, amount_cents=amount_cents, direction=direction,
         frequency=frequency, day=day, occurrence_days=occurrence_days,
@@ -87,6 +89,7 @@ def _row(kind, id_, name, amount_cents, direction, *, frequency=None, day=None,
         reference_id=reference_id, account_name=account_name, start_month=start_month,
         end_month=end_month, day_of_week=day_of_week, deferral_id=deferral_id,
         deferred_to=deferred_to, carried_from=carried_from, carry_source_id=carry_source_id,
+        daily=daily,
     )
 
 
@@ -120,6 +123,7 @@ def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
     """
     rows = []
     year = int(month[:4])
+    spend = daily_svc.month_spend(db, year, mon) if not normalized else {}
     for item in db.query(models.RecurringItem).all():
         if not active_in_month(item, month):
             continue
@@ -128,15 +132,21 @@ def _recurring_rows(db, month, mon, filters, *, normalized: bool) -> List[dict]:
         if not normalized and not cadence_hits(item.frequency, item.anchor_month, mon):
             continue
         days = _weekly_days(item, year, mon)
-        if not normalized and days is not None:
+        daily = None
+        if not normalized and item.spread_daily:
+            # one allowance per day; the month counts each day's logged
+            # spend (or its allowance if nothing is logged)
+            daily = daily_svc.build_days(item.amount_cents, year, mon, spend.get(item.id))
+            amount = daily_svc.month_total(daily)
+        elif not normalized and days is not None:
             # cash flow counts the real pay days (a 3-paycheck month is 3x)
             amount = item.amount_cents * len(days)
         else:
             amount = _recurring_amount(item.frequency, item.amount_cents, normalized)
         rows.append(_row(
             "recurring", item.id, item.name, amount, item.direction,
-            frequency=item.frequency, day=item.day_of_month,
-            occurrence_days=days,
+            frequency=item.frequency, day=None if item.spread_daily else item.day_of_month,
+            occurrence_days=days, daily=daily,
             face_amount_cents=item.amount_cents,
             notes=item.notes, reference_id=item.reference_id,
             start_month=item.start_month, end_month=item.end_month,
@@ -247,6 +257,13 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
                 new_amount = round(original * adj.multiplier)
             target["amount_cents"] = new_amount
             target["original_amount_cents"] = original
+            if not is_fund and not normalized and target.get("daily") is not None:
+                # the scenario changes the plan; real logged costs stay
+                new_face = (adj.override_amount_cents if adj.override_amount_cents is not None
+                            else round(target["face_amount_cents"] * adj.multiplier))
+                allowances = daily_amounts(new_face, len(target["daily"]))
+                target["daily"] = [{**d, "allowance_cents": a} for d, a in zip(target["daily"], allowances)]
+                target["amount_cents"] = daily_svc.month_total(target["daily"])
             target["effect"] = "modified"
             # keep the per-payment (calendar) amount in step with the change
             if not is_fund and target.get("face_amount_cents") is not None:

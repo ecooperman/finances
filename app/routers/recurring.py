@@ -60,7 +60,10 @@ def update_recurring(
     item_id: int, updates: schemas.RecurringItemUpdate, db: Session = Depends(get_db)
 ):
     _reject_duplicate_reference_id(db, updates.reference_id, exclude_id=item_id)
-    item = crud.update_recurring_item(db, item_id, updates)
+    try:
+        item = crud.update_recurring_item(db, item_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     if item is None:
         raise HTTPException(status_code=404, detail="Recurring item not found")
     return item

@@ -36,6 +36,8 @@ def defer_payment(db: Session, item_id: int, month: str) -> models.PaymentDeferr
         raise DeferralError("Recurring item not found", 404)
     if item.direction != "out":
         raise DeferralError("Only money-out items can be carried over")
+    if item.spread_daily:
+        raise DeferralError("Daily-spread items are spent day by day, so there is nothing to carry over")
     mon = int(month[5:7])
     if not active_in_month(item, month) or not cadence_hits(item.frequency, item.anchor_month, mon):
         raise DeferralError("That item has no payment due in that month")

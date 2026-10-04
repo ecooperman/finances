@@ -121,6 +121,11 @@ class RecurringItem(Base):
     person_id = Column(Integer, ForeignKey("people.id", ondelete="SET NULL"), nullable=True)
 
     active = Column(Boolean, nullable=False, default=True)
+    # Monthly money-out items only: instead of landing on one day, the
+    # monthly amount is spread across every day of the month as a daily
+    # allowance, and the day's real spending can be logged against it
+    # (see DailySpend).
+    spread_daily = Column(Boolean, nullable=False, default=False, server_default="0")
     # Inclusive "YYYY-MM" bounds; NULL means unbounded on that side.
     start_month = Column(String, nullable=True)
     end_month = Column(String, nullable=True)
@@ -282,6 +287,24 @@ class PaymentDeferral(Base):
     origin_id = Column(
         Integer, ForeignKey("payment_deferrals.id", ondelete="CASCADE"), nullable=True
     )
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class DailySpend(Base):
+    """One real cost logged against a daily-spread recurring item on a day
+    ("Uber to the airport", $34.20). A day's actual is the sum of its rows;
+    a day with none is assumed to cost the planned daily allowance."""
+
+    __tablename__ = "daily_spend"
+
+    id = Column(Integer, primary_key=True)
+    recurring_item_id = Column(
+        Integer, ForeignKey("recurring_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    date = Column(Date, nullable=False, index=True)
+    amount_cents = Column(Integer, nullable=False)
+    note = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

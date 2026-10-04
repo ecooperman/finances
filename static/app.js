@@ -29,6 +29,11 @@ function shortMonth(ym) {
   return MONTH_NAMES[Number(ym.slice(5, 7)) - 1].slice(0, 3);
 }
 
+// A daily-spread day counts at what was logged, else at its allowance.
+function dailyEffective(d) {
+  return d.entries.length ? d.spent_cents : d.allowance_cents;
+}
+
 // Scenario-removed and carried-to-next-month rows are shown but not counted.
 function countsInTotals(r) {
   return r.effect !== "removed" && r.effect !== "deferred";
@@ -48,6 +53,14 @@ function row(r) {
       class: "fin-cadence",
       text: freqLabel(r.frequency) + (n > 1 ? ` · ${n}×` : ""),
       title: n > 1 ? `${n} pay days this month, ${fmtMoney(r.face_amount_cents)} each` : "",
+    }));
+  }
+  if (r.daily) {
+    const logged = r.daily.filter((d) => d.entries.length).length;
+    main.appendChild(el("span", {
+      class: "fin-cadence",
+      text: `Daily · ${fmtMoney(r.daily[0].allowance_cents)}/day` + (logged ? ` · ${logged} logged` : ""),
+      title: "Spread across every day of the month. Click a day on the calendar to log what you spent.",
     }));
   }
   if (r.effect === "added") main.appendChild(el("span", { class: "fin-tag fin-tag-added", text: "added" }));
@@ -81,6 +94,9 @@ function row(r) {
 // day at all go last under "—".
 function dayGroupOf(r) {
   const [y, m] = state.month.split("-").map(Number);
+  if (r.daily) {
+    return { key: "daily", order: 99, top: "Daily", bottom: "↻", title: "Spent every day" };
+  }
   if (r.day != null) {
     const dt = new Date(y, m - 1, r.day);
     return {
@@ -148,6 +164,23 @@ function calEntry(r) {
   });
 }
 
+// One chip per day for all the daily-spread items together. Muted when a
+// past day has an item with nothing logged (it's counting the allowance).
+function dailyChip(dailies, pastDay) {
+  const live = dailies.filter(countsInTotals);
+  const total = live.reduce((s, r) => s + r.amount_cents, 0);
+  const anyLogged = live.some((r) => r.daily_day.entries.length);
+  const assumed = pastDay && live.some((r) => !r.daily_day.entries.length);
+  return el("div", {
+    class: "fin-cal-entry fin-cal-amt-out fin-cal-daily" + (assumed ? " fin-cal-daily-assumed" : ""),
+    title: dailies
+      .map((r) => `${r.name} · ${fmtMoney(r.amount_cents)} `
+        + (r.daily_day.entries.length ? "(logged)" : `(planned${assumed ? ", nothing logged" : ""})`))
+      .join("\n"),
+    text: `${anyLogged ? "✎ " : ""}Daily ${fmtMoney(total)}`,
+  });
+}
+
 function renderCalendar(month, rows) {
   const cal = document.getElementById("calendar");
   const noDayEl = document.getElementById("cal-noday");
@@ -163,6 +196,14 @@ function renderCalendar(month, rows) {
     byDay.get(d).push(r);
   };
   for (const r of rows) {
+    // daily-spread: one entry per day (effective amount), tagged so the
+    // cell can fold them into a single "Daily $X" chip
+    if (r.daily) {
+      for (const d of r.daily) {
+        addToDay(d.day, { ...r, day: d.day, amount_cents: dailyEffective(d), daily_day: d });
+      }
+      continue;
+    }
     // weekly / biweekly with a weekday set: the server gives the real pay
     // days; each shows the real per-payment amount (not the smoothed one).
     if (r.occurrence_days && r.occurrence_days.length) {
@@ -208,12 +249,18 @@ function renderCalendar(month, rows) {
     if (inMonth) {
       cell.appendChild(el("div", { class: "fin-cal-date", text: String(dayNum) }));
       const entries = byDay.get(dayNum) || [];
-      for (const r of entries.slice(0, CAL_ENTRY_CAP)) cell.appendChild(calEntry(r));
-      if (entries.length > CAL_ENTRY_CAP) {
+      const plain = entries.filter((r) => !r.daily_day);
+      for (const r of plain.slice(0, CAL_ENTRY_CAP)) cell.appendChild(calEntry(r));
+      const dailies = entries.filter((r) => r.daily_day);
+      if (dailies.length) {
+        const pastDay = month < thisMonth() || (month === thisMonth() && dayNum < todayDay);
+        cell.appendChild(dailyChip(dailies, pastDay));
+      }
+      if (plain.length > CAL_ENTRY_CAP) {
         cell.appendChild(el("div", {
           class: "fin-cal-more",
-          text: `+${entries.length - CAL_ENTRY_CAP} more`,
-          title: entries
+          text: `+${plain.length - CAL_ENTRY_CAP} more`,
+          title: plain
             .slice(CAL_ENTRY_CAP)
             .map((r) => `${r.name} · ${fmtMoney(r.amount_cents)}`)
             .join("\n"),
@@ -368,6 +415,7 @@ async function render() {
     outCount.textContent = `${outRows.length} item${outRows.length === 1 ? "" : "s"}`;
     renderTotals(data);
     loadPaycheck();
+    loadToday();
   } catch (err) {
     Global.showMessage(err.message, "error");
   }
@@ -484,6 +532,99 @@ initFilters().then(() => {
 
 // --- day detail modal (click a calendar day) ---
 
+// --- logging real costs against a daily-spread item ---
+
+function isoDay(month, day) {
+  return `${month}-${String(day).padStart(2, "0")}`;
+}
+
+async function logSpend(itemId, isoDate, amountText, noteText) {
+  const cents = dollarsToCents(amountText);
+  if (cents == null || cents <= 0) {
+    Global.showMessage("Enter a dollar amount greater than zero.", "error");
+    return false;
+  }
+  try {
+    await fetchJSON(`${API}/daily-spend`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        recurring_item_id: itemId, date: isoDate, amount_cents: cents, note: noteText.trim() || null,
+      }),
+    });
+    return true;
+  } catch (err) {
+    Global.showMessage(err.message, "error");
+    return false;
+  }
+}
+
+async function removeSpend(entryId) {
+  try {
+    await fetchJSON(`${API}/daily-spend/${entryId}`, { method: "DELETE" });
+    return true;
+  } catch (err) {
+    Global.showMessage(err.message, "error");
+    return false;
+  }
+}
+
+// "$18.00 airport  x" lines plus an add row - shared by the day modal and
+// the Today card. `onChange` re-renders after any add/remove.
+function spendEntriesEditor(itemId, isoDate, entries, onChange) {
+  const list = el("div", { class: "fin-spend-list" }, entries.map((e) =>
+    el("div", { class: "fin-spend-entry" }, [
+      el("span", { class: "fin-spend-amt", text: fmtMoney(e.amount_cents) }),
+      el("span", { class: "fin-spend-note", text: e.note || "" }),
+      el("button", {
+        type: "button", class: "fin-spend-del", title: "Remove this cost", "aria-label": "Remove this cost",
+        text: "×", onclick: async () => { if (await removeSpend(e.id)) onChange(); },
+      }),
+    ])));
+  const amount = el("input", { type: "text", inputmode: "decimal", placeholder: "$ spent", "aria-label": "Amount spent" });
+  const note = el("input", { type: "text", placeholder: "note (optional)", "aria-label": "Note" });
+  const submit = async () => {
+    if (await logSpend(itemId, isoDate, amount.value, note.value)) onChange();
+  };
+  const add = el("form", { class: "fin-spend-add" }, [
+    amount, note, el("button", { type: "submit", class: "fin-spend-btn", text: "Add" }),
+  ]);
+  add.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
+  return el("div", { class: "fin-spend-editor" }, [list, add]);
+}
+
+function overUnderText(cents) {
+  return cents > 0 ? `${fmtMoney(cents)} over` : cents < 0 ? `${fmtMoney(-cents)} under` : "on budget";
+}
+
+function dailyItemBlock(r, dayNum) {
+  const d = r.daily_day;
+  const logged = d.entries.length > 0;
+  const diff = d.spent_cents - d.allowance_cents;
+  const head = el("div", { class: "fin-day-item-head" }, [
+    el("span", { class: "fin-day-item-name", text: r.name }),
+    el("span", { class: "fin-day-item-amt fin-amount-out", text: "−" + fmtMoney(r.amount_cents) }),
+  ]);
+  const chips = [
+    el("span", { class: "fin-cadence", text: "Daily" }),
+    categoryChip(r.category),
+    personBadge(r.person),
+  ];
+  const summary = el("div", { class: "fin-day-item-detail" }, [
+    `Allowance ${fmtMoney(d.allowance_cents)} · `,
+    logged
+      ? el("span", { class: diff > 0 ? "fin-net-neg" : "fin-net-pos", text: `spent ${fmtMoney(d.spent_cents)} (${overUnderText(diff)})` })
+      : "nothing logged - counting the allowance",
+  ]);
+  const editor = spendEntriesEditor(r.id, isoDay(CAL_MONTH, dayNum), d.entries, async () => {
+    await render();
+    openDayModal(dayNum);
+  });
+  return el("div", { class: "fin-day-item fin-day-item-daily" }, [
+    head, el("div", { class: "fin-day-item-chips" }, chips), summary, editor,
+  ]);
+}
+
 async function changeDeferral(dayNum, send) {
   try {
     await send();
@@ -510,7 +651,7 @@ function deferralActions(r, dayNum) {
     return button(`Undo - I'll pay it in ${shortMonth(CAL_MONTH)}`, () =>
       changeDeferral(dayNum, () => fetchJSON(`${API}/deferrals/${r.deferral_id}`, { method: "DELETE" })));
   }
-  if (r.effect !== "normal" || r.direction !== "out") return null;
+  if (r.effect !== "normal" || r.direction !== "out" || r.daily) return null;
   if (r.kind === "carryover") {
     return button(`Couldn't pay this either - carry to ${next}`, () =>
       changeDeferral(dayNum, () => post({ origin_id: r.carry_source_id })), "fin-day-action-warn");
@@ -625,7 +766,8 @@ function openDayModal(dayNum) {
       }),
     ]));
   }
-  body.appendChild(el("div", { class: "fin-day-items" }, entries.map((r) => dayItemBlock(r, dayNum))));
+  body.appendChild(el("div", { class: "fin-day-items" }, entries.map((r) =>
+    r.daily_day ? dailyItemBlock(r, dayNum) : dayItemBlock(r, dayNum))));
   Global.openModal("day-modal");
 }
 
@@ -705,3 +847,52 @@ async function initPaycheck() {
   paycheckPersonSelect.addEventListener("change", loadPaycheck);
 }
 initPaycheck();
+
+
+// --- "today" card: daily-spread items, allowance vs. what's been spent ---
+
+const todayCard = document.getElementById("today-card");
+const todayBody = document.getElementById("today-body");
+
+async function loadToday() {
+  let d;
+  try {
+    d = await fetchJSON(`${API}/daily-budget?on=${localISODate()}`);
+  } catch (err) {
+    todayCard.classList.add("hidden");
+    return;
+  }
+  todayBody.innerHTML = "";
+  todayCard.classList.toggle("hidden", !d.items.length);
+  document.getElementById("today-date").textContent = fmtLongDate(d.as_of);
+  for (const it of d.items) todayBody.appendChild(todayItem(it, d.as_of));
+}
+
+function todayItem(it, asOf) {
+  const over = it.left_today_cents < 0;
+  const pct = it.allowance_cents > 0 ? Math.min(100, Math.round((it.spent_today_cents / it.allowance_cents) * 100)) : 0;
+  const left = el("div", { class: "fin-today-left " + (over ? "fin-net-neg" : "fin-net-pos") }, [
+    el("strong", { text: fmtMoney(Math.abs(it.left_today_cents)) }),
+    el("span", { text: over ? " over today" : " left today" }),
+  ]);
+  const month = [
+    `${fmtMoney(it.month_left_cents)} left of ${fmtMoney(it.monthly_cents)} this month`,
+    it.per_day_left_cents != null
+      ? `${fmtMoney(it.per_day_left_cents)}/day for the next ${it.days_left} day${it.days_left === 1 ? "" : "s"}`
+      : null,
+    it.logged_over_under_cents ? `${overUnderText(it.logged_over_under_cents)} on logged days` : null,
+  ].filter(Boolean).join(" · ");
+
+  return el("div", { class: "fin-today-item" }, [
+    el("div", { class: "fin-today-head" }, [
+      el("span", { class: "fin-today-name" }, [it.name, " ", personBadge(it.person)]),
+      left,
+    ]),
+    el("div", { class: "fin-today-bar" + (over ? " fin-today-bar-over" : "") }, [
+      el("div", { class: "fin-today-bar-fill", style: `width:${pct}%` }),
+    ]),
+    el("div", { class: "fin-today-sub", text: `Spent ${fmtMoney(it.spent_today_cents)} of ${fmtMoney(it.allowance_cents)} allowed today` }),
+    spendEntriesEditor(it.item_id, asOf, it.entries_today, render),
+    el("div", { class: "fin-today-month", text: month }),
+  ]);
+}

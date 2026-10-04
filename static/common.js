@@ -216,11 +216,15 @@ function recurringScheduleBlockHTML(it) {
           <label>First month it hits</label>
           <select name="anchor_month">${MONTH_OPTIONS.map((m) => _opt(m.value, m.label, it.anchor_month || "")).join("")}</select>
         </div>
-        <div class="field">
+        <div class="field fin-dom-field">
           <label>Day of month</label>
           <input name="day_of_month" type="number" min="1" max="31" value="${it.day_of_month || ""}" placeholder="opt." />
         </div>
       </div>
+      <label class="checkbox-label fin-daily-field hidden">
+        <input name="spread_daily" type="checkbox"${it.spread_daily ? " checked" : ""} />
+        Spend this every day - spread it across the month as a daily allowance, and log what's actually spent
+      </label>
       <div class="field-row fin-week-row">
         <div class="field fin-dow-field">
           <label>Day of week</label>
@@ -243,6 +247,36 @@ function recurringScheduleBlockHTML(it) {
         <input name="reference_id" type="text" value="${escAttr(it.reference_id)}" placeholder="Affirm loan id, Klarna order ref, PayPal ..." />
       </div>
     </div>`;
+}
+
+// The "spend this daily" checkbox only makes sense for monthly money-out
+// items; when on, the single "day of month" no longer applies.
+function syncDailyField(scope) {
+  const box = scope.querySelector('[name="spread_daily"]');
+  if (!box) return;
+  const freq = scope.querySelector('[name="frequency"]').value;
+  const direction = scope.querySelector('[name="direction"]').value;
+  const eligible = freq === "monthly" && direction === "out";
+  scope.querySelector(".fin-daily-field").classList.toggle("hidden", !eligible);
+  if (!eligible) box.checked = false;
+  const dom = scope.querySelector(".fin-dom-field");
+  if (dom) dom.classList.toggle("hidden", box.checked);
+}
+
+function wireDailyField(scope) {
+  const box = scope.querySelector('[name="spread_daily"]');
+  if (!box) return;
+  for (const name of ["frequency", "direction"]) {
+    const input = scope.querySelector(`[name="${name}"]`);
+    if (input) input.addEventListener("change", () => syncDailyField(scope));
+  }
+  box.addEventListener("change", () => syncDailyField(scope));
+  syncDailyField(scope);
+}
+
+function readSpreadDaily(scope, freq, direction) {
+  const box = scope.querySelector('[name="spread_daily"]');
+  return !!(box && box.checked && freq === "monthly" && direction === "out");
 }
 
 function onetimeBlockHTML(t) {
@@ -380,6 +414,7 @@ function wireEntryForm(scope, people, categories, funds = []) {
     if (weekAnchorField) weekAnchorField.classList.toggle("hidden", freq.value !== "biweekly");
     if (dateInput) dateInput.required = t === "transaction";
     fundNField.classList.toggle("hidden", !["weeks", "months", "times_year"].includes(fundUnit.value));
+    syncDailyField(scope);
     refreshFundPreview();
   };
 
@@ -390,6 +425,8 @@ function wireEntryForm(scope, people, categories, funds = []) {
     })
   );
   freq.addEventListener("change", sync);
+  scope.querySelector('[name="direction"]').addEventListener("change", sync);
+  scope.querySelector('[name="spread_daily"]').addEventListener("change", sync);
   fundUnit.addEventListener("change", sync);
   fundAmount.addEventListener("input", refreshFundPreview);
   fundN.addEventListener("input", refreshFundPreview);
@@ -441,7 +478,10 @@ function readEntryForm(scope) {
         ...base,
         frequency: freq,
         anchor_month: isSubMonthlyFreq(freq) ? Number(g("anchor_month").value) : null,
-        day_of_month: g("day_of_month").value ? Number(g("day_of_month").value) : null,
+        spread_daily: readSpreadDaily(scope, freq, base.direction),
+        day_of_month:
+          !readSpreadDaily(scope, freq, base.direction) && g("day_of_month").value
+            ? Number(g("day_of_month").value) : null,
         day_of_week:
           isWeeklyFreq(freq) && g("day_of_week").value !== "" ? Number(g("day_of_week").value) : null,
         week_anchor: freq === "biweekly" ? g("week_anchor").value || null : null,

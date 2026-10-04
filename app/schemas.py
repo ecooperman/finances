@@ -143,6 +143,9 @@ class RecurringItemBase(BaseModel):
     end_month: Optional[str] = None
     notes: Optional[str] = None
     reference_id: Optional[str] = None  # provider ref for a BNPL plan; unique
+    # Monthly money-out only: spread the amount over every day as a daily
+    # allowance (and let real spending be logged per day).
+    spread_daily: bool = False
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
     _check_anchor = field_validator("anchor_month")(_valid_anchor_month)
@@ -155,6 +158,8 @@ class RecurringItemBase(BaseModel):
     def _anchor_required_for_submonthly(self):
         if self.frequency in SUBMONTHLY_FREQUENCIES and self.anchor_month is None:
             raise ValueError("anchor_month is required for quarterly / semi-annual / annual")
+        if self.spread_daily and (self.frequency != "monthly" or self.direction != "out"):
+            raise ValueError("only monthly money-out items can be spread across every day")
         return self
 
 
@@ -178,6 +183,7 @@ class RecurringItemUpdate(BaseModel):
     end_month: Optional[str] = None
     notes: Optional[str] = None
     reference_id: Optional[str] = None
+    spread_daily: Optional[bool] = None
 
     _check_amount = field_validator("amount_cents")(_positive_cents)
     _check_anchor = field_validator("anchor_month")(_valid_anchor_month)
@@ -398,7 +404,7 @@ class DatedPayment(BaseModel):
     date: date_type
     name: str
     amount_cents: int  # the real per-payment amount, not smoothed
-    kind: Literal["recurring", "transaction", "carryover"]
+    kind: Literal["recurring", "transaction", "carryover", "daily"]
 
 
 class UndatedItem(BaseModel):
@@ -549,6 +555,23 @@ class Scenario(ScenarioBase):
 # ---------------------------------------------------------------------------
 
 
+class DailyEntry(BaseModel):
+    id: int
+    amount_cents: int
+    note: Optional[str] = None
+
+
+class DailyDay(BaseModel):
+    """One day of a daily-spread item: the planned allowance and what was
+    actually logged. The day counts at `spent_cents` if anything is logged
+    (`entries` non-empty), else at the allowance."""
+
+    day: int
+    allowance_cents: int
+    spent_cents: int = 0
+    entries: List[DailyEntry] = []
+
+
 class MonthRow(BaseModel):
     kind: Literal["recurring", "transaction", "fund", "trip", "carryover"]
     id: int
@@ -563,6 +586,10 @@ class MonthRow(BaseModel):
     # on - the calendar draws one entry per day at the face amount.
     face_amount_cents: Optional[int] = None
     occurrence_days: Optional[List[int]] = None
+    # Daily-spread items: one DailyDay per day of the month (amount_cents is
+    # then the month's sum of each day's effective amount; face_amount_cents
+    # stays the monthly budget).
+    daily: Optional[List[DailyDay]] = None
     # Line-item details shown when you click a day on the calendar.
     notes: Optional[str] = None
     reference_id: Optional[str] = None
@@ -648,3 +675,58 @@ class DeferralOut(BaseModel):
     origin_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- daily spending: per-day actuals against a daily-spread item ----------
+
+
+class DailySpendCreate(BaseModel):
+    recurring_item_id: int
+    date: date_type
+    amount_cents: int
+    note: Optional[str] = None
+
+    _check_amount = field_validator("amount_cents")(_positive_cents)
+    _check_note = field_validator("note")(_blank_to_none)
+
+
+class DailySpendUpdate(BaseModel):
+    amount_cents: Optional[int] = None
+    note: Optional[str] = None
+
+    _check_amount = field_validator("amount_cents")(_positive_cents)
+    _check_note = field_validator("note")(_blank_to_none)
+
+
+class DailySpendOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    recurring_item_id: int
+    date: date_type
+    amount_cents: int
+    note: Optional[str] = None
+
+
+class DailyBudgetItem(BaseModel):
+    """Where one daily-spread item stands as of a day (the Today card)."""
+
+    item_id: int
+    name: str
+    category: Optional[Category] = None
+    person: Optional[Person] = None
+    monthly_cents: int
+    allowance_cents: int  # today's planned amount
+    spent_today_cents: int
+    left_today_cents: int  # allowance - spent (negative = over)
+    entries_today: List[DailyEntry]
+    # Over/under on the days that have something logged, month to date
+    # (positive = spent more than allowed). Unlogged days assume the allowance.
+    logged_over_under_cents: int
+    month_left_cents: int  # monthly budget - effective spend through today
+    days_left: int  # days after today
+    per_day_left_cents: Optional[int] = None  # month_left / days_left
+
+
+class DailyBudget(BaseModel):
+    as_of: date_type
+    items: List[DailyBudgetItem]

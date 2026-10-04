@@ -74,6 +74,7 @@ function wireAnchor(scope) {
   };
   freq.addEventListener("change", sync);
   sync();
+  wireDailyField(scope);
 }
 
 function passesClientFilters(row) {
@@ -159,7 +160,10 @@ function readRecurring(scope) {
     direction: g("direction").value,
     frequency: freq,
     anchor_month: isSubMonthlyFreq(freq) ? Number(g("anchor_month").value) : null,
-    day_of_month: g("day_of_month").value ? Number(g("day_of_month").value) : null,
+    spread_daily: readSpreadDaily(scope, freq, g("direction").value),
+    day_of_month:
+      !readSpreadDaily(scope, freq, g("direction").value) && g("day_of_month").value
+        ? Number(g("day_of_month").value) : null,
     day_of_week:
       isWeeklyFreq(freq) && g("day_of_week").value !== "" ? Number(g("day_of_week").value) : null,
     week_anchor: freq === "biweekly" ? g("week_anchor").value || null : null,
@@ -178,7 +182,7 @@ function readRecurring(scope) {
 // are skipped by the calendar and the "until next paycheck" total, so we
 // flag them (mirrors schedule.occurrence_days returning None).
 function isUndatedRecurring(item) {
-  if (!item.active) return false;
+  if (!item.active || item.spread_daily) return false;
   return isWeeklyFreq(item.frequency) ? item.day_of_week == null : item.day_of_month == null;
 }
 
@@ -191,6 +195,7 @@ function recurringCard(item) {
     el("span", { class: "fin-item-icon", "data-icon": "repeat", "aria-hidden": "true" }),
     el("span", { class: "item-summary-title", text: item.name }),
     item.frequency !== "monthly" ? el("span", { class: "fin-cadence", text: freqLabel(item.frequency) }) : null,
+    item.spread_daily ? el("span", { class: "fin-cadence", text: "Daily" }) : null,
     !item.active ? el("span", { class: "fin-tag fin-tag-removed", text: "paused" }) : null,
     undated
       ? el("span", { class: "fin-tag fin-tag-nodate", text: isWeeklyFreq(item.frequency) ? "no weekday" : "no day" })

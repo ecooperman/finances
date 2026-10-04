@@ -168,6 +168,9 @@ def update_recurring_item(db: Session, item_id: int, updates: schemas.RecurringI
         return None
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_item, field, value)
+    if db_item.spread_daily and (db_item.frequency != "monthly" or db_item.direction != "out"):
+        db.rollback()
+        raise ValueError("only monthly money-out items can be spread across every day")
     db.commit()
     db.refresh(db_item)
     return db_item
@@ -178,6 +181,7 @@ def delete_recurring_item(db: Session, item_id: int) -> bool:
     if db_item is None:
         return False
     deferrals.clear_for(db, recurring_item_id=item_id)
+    db.query(models.DailySpend).filter_by(recurring_item_id=item_id).delete()
     db.delete(db_item)
     db.commit()
     return True
@@ -286,6 +290,7 @@ def convert_recurring_to_transaction(db: Session, item_id: int, when):
     )
     db.add(txn)
     deferrals.clear_for(db, recurring_item_id=item.id)
+    db.query(models.DailySpend).filter_by(recurring_item_id=item.id).delete()
     db.delete(item)
     db.commit()
     db.refresh(txn)

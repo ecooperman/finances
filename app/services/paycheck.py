@@ -16,6 +16,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import daily as daily_svc
 from .schedule import active_in_month, cadence_hits, occurrence_days, shift_month
 
 HORIZON_DAYS = 62  # how far ahead to look for a paycheck
@@ -72,6 +73,13 @@ def dated_events(db: Session, start: date, end: date):
                 "person_id": item.person_id,
             })
 
+    spend_cache = {}
+
+    def daily_spend_by_month(year, mon):
+        if (year, mon) not in spend_cache:
+            spend_cache[(year, mon)] = daily_svc.month_spend(db, year, mon)
+        return spend_cache[(year, mon)]
+
     for year, mon in _months_between(start, end):
         month = f"{year:04d}-{mon:02d}"
         for item in items:
@@ -80,6 +88,27 @@ def dated_events(db: Session, start: date, end: date):
             if not cadence_hits(item.frequency, item.anchor_month, mon):
                 continue
             if (item.id, month) in deferred:
+                continue
+            if item.spread_daily:
+                # every day of the month at its allowance (or what was logged);
+                # on `start` itself only what's left of today's allowance counts
+                days = daily_svc.build_days(
+                    item.amount_cents, year, mon, daily_spend_by_month(year, mon).get(item.id)
+                )
+                for d in days:
+                    when = date(year, mon, d["day"])
+                    if not (start <= when <= end):
+                        continue
+                    if when == start:
+                        amount = max(d["allowance_cents"] - d["spent_cents"], 0)
+                    else:
+                        amount = daily_svc.effective(d)
+                    if amount > 0:
+                        events.append({
+                            **_payment(when, item.name, amount, "daily"),
+                            "direction": item.direction,
+                            "person_id": item.person_id,
+                        })
                 continue
             days = occurrence_days(
                 item.frequency, item.day_of_month, item.day_of_week, item.week_anchor, year, mon
@@ -112,6 +141,28 @@ def dated_events(db: Session, start: date, end: date):
 
     events.sort(key=lambda e: (e["date"], e["name"].lower()))
     return events, list(undated.values())
+
+
+def _collapse_daily(events: List[dict]) -> List[dict]:
+    """One line per daily-spread item ("Ubers - 6 days") instead of a row for
+    every day, dated its first day in the span."""
+    out: List[dict] = []
+    rolled: dict = {}
+    for e in events:
+        if e["kind"] != "daily":
+            out.append(e)
+            continue
+        agg = rolled.get(e["name"])
+        if agg is None:
+            agg = rolled[e["name"]] = {**e, "days": 0}
+            out.append(agg)
+        else:
+            agg["amount_cents"] += e["amount_cents"]
+        agg["days"] += 1
+    for agg in rolled.values():
+        n = agg.pop("days")
+        agg["name"] = f"{agg['name']} (daily, {n} day{'s' if n != 1 else ''})"
+    return out
 
 
 def until_next_paycheck(
@@ -149,7 +200,7 @@ def until_next_paycheck(
         return result
 
     outs = [e for e in events if e["direction"] == "out"]
-    before = [e for e in outs if on <= e["date"] < nxt["date"]]
+    before = _collapse_daily([e for e in outs if on <= e["date"] < nxt["date"]])
     on_payday = [e for e in outs if e["date"] == nxt["date"]]
 
     result["next_paycheck"] = {

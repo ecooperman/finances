@@ -76,3 +76,10 @@ def shift_month(month: str, delta: int) -> str:
     y, m = (int(p) for p in month.split("-"))
     idx = y * 12 + (m - 1) + delta
     return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+
+
+def daily_amounts(total_cents: int, days_in_month: int) -> list:
+    """A monthly amount split across every day of the month, cents exact:
+    the first (total % days) days carry the extra cent."""
+    base, extra = divmod(total_cents, days_in_month)
+    return [base + (1 if i < extra else 0) for i in range(days_in_month)]

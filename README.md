@@ -208,6 +208,26 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   account and notes, plus a net total labelled **Net in** (a payday) or
   **Net out** with the in/out split and the month's running total through
   that day.
+- **Daily-spread items** (Ubers, food, anything you pay for most days): tick
+  **"Spend this every day"** on a *monthly money-out* recurring item. The
+  amount stays the monthly budget (totals, Provisioned and scenarios are
+  unchanged) but is placed on the calendar as a **daily allowance** - the
+  month split across its real days, cents exact. All the daily items fold
+  into one `Daily $X` chip per calendar day, and they count on every day in
+  the running total and the "Until next paycheck" card (which collapses
+  them to one line per item; today counts only what's left of today's
+  allowance). Click a day to **log what you actually spent**: each cost is
+  its own entry (amount + optional note), so two Ubers in a day are two
+  entries and the day totals them. A day with logged costs counts at the
+  logged total; a day with none assumes the allowance (shown muted on past
+  days), so the numbers fall back to the budget if you stop logging. The
+  Overview's **Today's spending** card shows each item's allowance vs.
+  spent today, what's left this month and per remaining day, and the
+  over/under on logged days, with a quick-add row. API: `daily_spend` table,
+  `POST/PATCH/DELETE /api/daily-spend`, `GET /api/daily-budget?on=`
+  (`app/services/daily.py`). Daily items can't be carried over (nothing to
+  carry - they're spent day by day), and a scenario rescales the plan but
+  keeps real logged costs.
 - **Carrying over unpaid items**: in the day pop-up, a money-out recurring
   item has **"Couldn't pay this - carry to <next month>"**. It's then
   dropped from that month's cash flow / running total (shown struck
