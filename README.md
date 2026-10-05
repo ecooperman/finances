@@ -208,6 +208,26 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   account and notes, plus a net total labelled **Net in** (a payday) or
   **Net out** with the in/out split and the month's running total through
   that day.
+- **Opening balance / rollover** (Overview, above the calendar): each
+  month opens with the previous month's **closing balance** - its opening
+  plus its dated net cash flow, the figure the calendar's running balance
+  ends on - so a big month (three paychecks) carries into the next instead
+  of every month starting from $0. The calendar's `Σ` is now a running
+  *balance* that starts at the opening. **Set actual** overrides the
+  opening with your real balance (any sign, optional note) when the logged
+  items don't add up; later months then roll forward from it, and **Back to
+  rollover** removes the override. Rules: items with no set day aren't in
+  it (same as the calendar's `Σ`); it's household-wide, so it's hidden when
+  a person/category filter is on; scenarios don't change it. The **Until
+  next paycheck** card uses it too: its headline is the balance you'll have
+  *just before* payday (or how short you'll be) = balance now (opening +
+  everything dated before today, today's income and logged daily spending
+  included) + other income landing before payday - what's left to pay; it
+  also shows the balance after the paycheck and payday bills. The chain
+  starts at the `rollover_start_month` app setting (the migration sets it
+  to the deploy month; earlier months open at $0 and don't roll) or the
+  earliest override. `GET /api/monthly` returns `opening`;
+  `PUT/DELETE /api/opening-balance/{month}`; `app/services/balance.py`.
 - **Daily-spread items** (Ubers, food, anything you pay for most days): tick
   **"Spend this every day"** on a *monthly money-out* recurring item. The
   amount stays the monthly budget (totals, Provisioned and scenarios are

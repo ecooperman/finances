@@ -1128,3 +1128,109 @@
   color: #fff;
   cursor: pointer;
 }
+
+/* --- opening balance (rolled over / overridden) --- */
+
+.fin-opening {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.fin-opening.hidden {
+  display: none;
+}
+.fin-opening-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.fin-opening-label {
+  color: var(--muted);
+}
+.fin-opening strong {
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+.fin-opening-src {
+  color: var(--muted);
+  font-size: 12px;
+}
+.fin-opening-end {
+  color: var(--muted);
+}
+.fin-opening-form {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+.fin-opening-form.hidden {
+  display: none;
+}
+.fin-opening-form input {
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.fin-opening-form input[name="amount"] {
+  width: 190px;
+}
+.fin-opening-form input[name="note"] {
+  flex: 1;
+  min-width: 140px;
+}
+.fin-link-btn {
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+  text-decoration: underline;
+}
+.fin-link-btn.hidden {
+  display: none;
+}
+.fin-cal-open {
+  background: transparent;
+  color: var(--muted);
+  border-left: 2px solid var(--muted);
+  font-weight: 600;
+}
+
+/* --- balance breakdown on the "until next paycheck" card --- */
+
+.fin-paycheck-balance {
+  margin: 8px 0 6px;
+  font-size: 13px;
+}
+.fin-paycheck-brow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 1px 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fin-paycheck-brow-strong {
+  color: var(--text);
+  font-weight: 600;
+  border-top: 1px solid var(--border);
+  margin-top: 3px;
+  padding-top: 4px;
+}

@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..models import FREQUENCY_INTERVAL_MONTHS, FREQUENCY_PER_MONTH
 from .funds import monthly_contribution_cents
+from . import balance as balance_svc
 from . import daily as daily_svc
 from .schedule import active_in_month, cadence_hits, daily_amounts, occurrence_days, shift_month
 from .trips import trip_forecasts
@@ -413,7 +414,7 @@ def compute_month(
     )
 
     side = _side(actual, normalized)
-    result = MonthResult(month=month, **side.model_dump())
+    result = MonthResult(month=month, opening=balance_svc.opening_balance(db, month), **side.model_dump())
 
     if scenario_id is not None:
         scenario = db.get(models.Scenario, scenario_id)

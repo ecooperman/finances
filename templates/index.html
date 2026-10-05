@@ -66,6 +66,22 @@
         <h2>Payment calendar</h2>
         <span class="list-count">reflects the filters above</span>
       </div>
+      <div id="opening-strip" class="fin-opening hidden">
+        <div class="fin-opening-main">
+          <span class="fin-opening-label">Opening balance</span>
+          <strong id="opening-amt"></strong>
+          <span id="opening-src" class="fin-opening-src"></span>
+          <button type="button" id="opening-edit" class="fin-link-btn">Set actual</button>
+        </div>
+        <form id="opening-form" class="fin-opening-form hidden">
+          <input name="amount" type="text" inputmode="decimal" placeholder="actual balance, e.g. 1250.00" aria-label="Opening balance" />
+          <input name="note" type="text" placeholder="note (optional)" aria-label="Note" />
+          <button type="submit" class="fin-spend-btn">Save</button>
+          <button type="button" id="opening-reset" class="fin-link-btn hidden">Back to rollover</button>
+          <button type="button" id="opening-cancel" class="fin-link-btn">Cancel</button>
+        </form>
+        <div class="fin-opening-end">Ends the month at <strong id="closing-amt"></strong></div>
+      </div>
       <div id="calendar" class="fin-cal"></div>
       <p id="cal-carry" class="fin-cal-noday fin-cal-carry hidden"></p>
       <p id="cal-noday" class="fin-cal-noday hidden"></p>

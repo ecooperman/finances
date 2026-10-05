@@ -143,7 +143,8 @@ const CAL_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const CAL_ENTRY_CAP = 4;
 let CAL_BY_DAY = new Map();
 let CAL_MONTH = "";
-let CAL_RUN = new Map(); // day -> month-to-date net after that day
+let CAL_RUN = new Map(); // day -> running balance after that day (opening + month so far)
+let CAL_OPENING = null; // the month's opening balance (null when filtered)
 
 // Net of a day's entries; scenario-removed rows don't count.
 function dayNet(entries) {
@@ -181,7 +182,8 @@ function dailyChip(dailies, pastDay) {
   });
 }
 
-function renderCalendar(month, rows) {
+function renderCalendar(month, rows, opening) {
+  CAL_OPENING = opening || null;
   const cal = document.getElementById("calendar");
   const noDayEl = document.getElementById("cal-noday");
   cal.innerHTML = "";
@@ -218,10 +220,12 @@ function renderCalendar(month, rows) {
     addToDay(r.day, r);
   }
 
-  // Running total: month-to-date net (starts at $0 on the 1st) over every
-  // dated item, so a payday lifts it and the loans around it pull it down.
+  // Running balance: the opening balance (rolled over from last month, or
+  // your override) plus every dated item so far - a payday lifts it and the
+  // loans around it pull it down. Starts at $0 when filtered (no household
+  // balance to start from).
   CAL_RUN = new Map();
-  let running = 0;
+  let running = opening ? opening.opening_cents : 0;
   for (let d = 1; d <= new Date(y, m, 0).getDate(); d++) {
     running += dayNet(byDay.get(d) || []);
     CAL_RUN.set(d, running);
@@ -248,6 +252,14 @@ function renderCalendar(month, rows) {
     });
     if (inMonth) {
       cell.appendChild(el("div", { class: "fin-cal-date", text: String(dayNum) }));
+      if (dayNum === 1 && opening) {
+        cell.appendChild(el("div", {
+          class: "fin-cal-entry fin-cal-open",
+          title: opening.from_month
+            ? `Opening balance, rolled over from ${monthLabel(opening.from_month)}` : "Opening balance",
+          text: `Open ${fmtSignedMoney(opening.opening_cents)}`,
+        }));
+      }
       const entries = byDay.get(dayNum) || [];
       const plain = entries.filter((r) => !r.daily_day);
       for (const r of plain.slice(0, CAL_ENTRY_CAP)) cell.appendChild(calEntry(r));
@@ -288,7 +300,8 @@ function renderCalendar(month, rows) {
         cell.appendChild(el("div", {
           class: "fin-cal-run " + (run < 0 ? "fin-net-neg" : "fin-net-pos"),
           text: "Σ " + fmtSignedMoney(run),
-          title: "Running total for the month through this day",
+          title: opening ? "Running balance through this day (opening balance + the month so far)"
+            : "Running total for the month through this day",
         }));
       }
     }
@@ -297,6 +310,7 @@ function renderCalendar(month, rows) {
   cal.appendChild(grid);
 
   renderCarryNote(month, rows);
+  renderOpening(opening, CAL_RUN.get(daysInMonth), month);
 
   if (noDay.length) {
     noDayEl.classList.remove("hidden");
@@ -305,6 +319,72 @@ function renderCalendar(month, rows) {
     noDayEl.classList.add("hidden");
   }
 }
+
+// --- opening balance strip (above the calendar) ---
+
+const openingStrip = document.getElementById("opening-strip");
+const openingForm = document.getElementById("opening-form");
+
+function renderOpening(opening, closingCents, month) {
+  openingStrip.classList.toggle("hidden", !opening);
+  openingForm.classList.add("hidden");
+  if (!opening) return;
+  const amt = document.getElementById("opening-amt");
+  amt.textContent = fmtSignedMoney(opening.opening_cents);
+  amt.className = opening.opening_cents < 0 ? "fin-net-neg" : "fin-net-pos";
+  let src;
+  if (opening.override_cents != null) {
+    src = `set by you${opening.note ? ` (${opening.note})` : ""} · rollover would be ${fmtSignedMoney(opening.computed_cents)}`;
+  } else if (opening.from_month) {
+    src = `rolled over from ${monthLabel(opening.from_month)}`;
+  } else {
+    src = "start of tracking - set your real balance to anchor the months after";
+  }
+  document.getElementById("opening-src").textContent = src;
+  const closing = document.getElementById("closing-amt");
+  closing.textContent = fmtSignedMoney(closingCents);
+  closing.className = closingCents < 0 ? "fin-net-neg" : "fin-net-pos";
+  OPENING_MONTH = month;
+  OPENING_STATE = opening;
+}
+
+let OPENING_MONTH = "";
+let OPENING_STATE = null;
+
+document.getElementById("opening-edit").addEventListener("click", () => {
+  openingForm.classList.toggle("hidden");
+  if (openingForm.classList.contains("hidden")) return;
+  openingForm.elements.amount.value = centsToInputValue(OPENING_STATE.opening_cents);
+  openingForm.elements.note.value = OPENING_STATE.note || "";
+  document.getElementById("opening-reset").classList.toggle("hidden", OPENING_STATE.override_cents == null);
+  openingForm.elements.amount.select();
+});
+document.getElementById("opening-cancel").addEventListener("click", () => openingForm.classList.add("hidden"));
+
+openingForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const cents = dollarsToCents(openingForm.elements.amount.value);
+  if (cents == null) return Global.showMessage("Enter the balance as a dollar amount (negative if overdrawn).", "error");
+  try {
+    await fetchJSON(`${API}/opening-balance/${OPENING_MONTH}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount_cents: cents, note: openingForm.elements.note.value.trim() || null }),
+    });
+    render();
+  } catch (err) {
+    Global.showMessage(err.message, "error");
+  }
+});
+
+document.getElementById("opening-reset").addEventListener("click", async () => {
+  try {
+    await fetchJSON(`${API}/opening-balance/${OPENING_MONTH}`, { method: "DELETE" });
+    render();
+  } catch (err) {
+    Global.showMessage(err.message, "error");
+  }
+});
 
 // One line under the calendar: what rolled in from last month, and what was
 // pushed to next month (neither is hidden in the lists - this is the summary).
@@ -408,7 +488,9 @@ async function render() {
     TRIPS_STATUS = tripsSummary;
     const inRows = data.scenario ? data.scenario.money_in : data.money_in;
     const outRows = data.scenario ? data.scenario.money_out : data.money_out;
-    renderCalendar(state.month, [...inRows, ...outRows]);
+    // the balance is the household's, so it's only shown unfiltered
+    const filtered = state.personVal || state.categoryIds.length;
+    renderCalendar(state.month, [...inRows, ...outRows], filtered ? null : data.opening);
     renderList(inList, inRows);
     renderList(outList, outRows);
     inCount.textContent = `${inRows.length} item${inRows.length === 1 ? "" : "s"}`;
@@ -759,7 +841,9 @@ function openDayModal(dayNum) {
   const run = CAL_RUN.get(dayNum);
   if (run != null) {
     body.appendChild(el("div", { class: "fin-day-run" }, [
-      el("span", { text: `Running total for the month, through the ${ordinal(dayNum)}` }),
+      el("span", { text: CAL_OPENING
+        ? `Running balance, through the ${ordinal(dayNum)}`
+        : `Running total for the month, through the ${ordinal(dayNum)}` }),
       el("strong", {
         class: run < 0 ? "fin-net-neg" : "fin-net-pos",
         text: fmtSignedMoney(run),
@@ -787,6 +871,13 @@ function fmtLongDate(iso) {
   });
 }
 
+function balanceRow(label, cents, { strong = false } = {}) {
+  return el("div", { class: "fin-paycheck-brow" + (strong ? " fin-paycheck-brow-strong" : "") }, [
+    el("span", { text: label }),
+    el("span", { class: cents < 0 ? "fin-net-neg" : "fin-net-pos", text: fmtSignedMoney(cents) }),
+  ]);
+}
+
 async function loadPaycheck() {
   const p = new URLSearchParams({ on: localISODate() });
   if (paycheckPersonSelect.value) p.set("person_id", paycheckPersonSelect.value);
@@ -800,6 +891,9 @@ async function loadPaycheck() {
   paycheckBody.innerHTML = "";
 
   if (!d.next_paycheck) {
+    paycheckBody.appendChild(el("div", { class: "fin-paycheck-balance" }, [
+      balanceRow("Balance now", d.balance_now_cents, { strong: true }),
+    ]));
     paycheckBody.appendChild(el("p", { class: "empty-state", text:
       "No upcoming paycheck found. Give an income item a day (monthly) or a day of the week (weekly/biweekly) and it will show up here." }));
     return;
@@ -811,13 +905,27 @@ async function loadPaycheck() {
     el("strong", { class: "fin-amount-in", text: `+${fmtMoney(nx.amount_cents)}` }),
   ]));
 
+  // The headline is what's left after the rolled-over balance covers what's
+  // due: you'll have $X just before payday - or you're short by that much.
+  const short = d.balance_before_payday_cents < 0;
   paycheckBody.appendChild(el("div", { class: "fin-paycheck-total" }, [
-    el("div", { class: "fin-paycheck-big fin-amount-out", text: fmtMoney(d.before_total_cents) }),
-    el("div", { class: "fin-paycheck-label", text: "left to pay before then" }),
+    el("div", {
+      class: "fin-paycheck-big " + (short ? "fin-net-neg" : "fin-net-pos"),
+      text: fmtMoney(Math.abs(d.balance_before_payday_cents)),
+    }),
+    el("div", { class: "fin-paycheck-label", text: short ? "short just before then" : "left just before then" }),
   ]));
+  const rows = [
+    balanceRow("Balance now", d.balance_now_cents),
+    d.income_before_cents ? balanceRow("Other income before then", d.income_before_cents) : null,
+    balanceRow("Left to pay before then", -d.before_total_cents),
+    balanceRow("Just before payday", d.balance_before_payday_cents, { strong: true }),
+  ].filter(Boolean);
+  paycheckBody.appendChild(el("div", { class: "fin-paycheck-balance" }, rows));
   if (d.on_payday.length) {
     paycheckBody.appendChild(el("div", { class: "fin-paycheck-sub", text:
-      `+ ${fmtMoney(d.on_payday_total_cents)} also due on payday (${d.on_payday.map((e) => e.name).join(", ")})` }));
+      `${fmtMoney(d.on_payday_total_cents)} also due on payday (${d.on_payday.map((e) => e.name).join(", ")}) - `
+      + `after the paycheck and those you'd have ${fmtSignedMoney(d.balance_after_payday_cents)}` }));
   }
 
   if (d.before.length) {

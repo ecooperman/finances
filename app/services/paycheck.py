@@ -16,6 +16,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from .. import models
+from . import balance as balance_svc
 from . import daily as daily_svc
 from .schedule import active_in_month, cadence_hits, occurrence_days, shift_month
 
@@ -195,6 +196,10 @@ def until_next_paycheck(
         "on_payday": [],
         "on_payday_total_cents": 0,
         "undated": [],
+        "balance_now_cents": balance_svc.balance_as_of(db, on),
+        "income_before_cents": 0,
+        "balance_before_payday_cents": None,
+        "balance_after_payday_cents": None,
     }
     if nxt is None:
         return result
@@ -213,6 +218,22 @@ def until_next_paycheck(
     result["before_total_cents"] = sum(e["amount_cents"] for e in before)
     result["on_payday"] = on_payday
     result["on_payday_total_cents"] = sum(e["amount_cents"] for e in on_payday)
+
+    # The balance: what you have now, other income that lands before payday
+    # (e.g. the other person's paycheck), less what's left to pay before it.
+    income_before = sum(
+        e["amount_cents"] for e in events
+        if e["direction"] == "in" and on < e["date"] < nxt["date"]
+    )
+    income_on_payday = sum(
+        e["amount_cents"] for e in events if e["direction"] == "in" and e["date"] == nxt["date"]
+    )
+    before_payday = result["balance_now_cents"] + income_before - result["before_total_cents"]
+    result["income_before_cents"] = income_before
+    result["balance_before_payday_cents"] = before_payday
+    result["balance_after_payday_cents"] = (
+        before_payday + income_on_payday - result["on_payday_total_cents"]
+    )
 
     # Only money-out items matter for "left to pay", and only ones whose month
     # overlaps the span we actually counted.

@@ -309,6 +309,33 @@ class DailySpend(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class MonthOpeningBalance(Base):
+    """A manual override of what a month opens with. Without one, a month
+    opens with the previous month's closing balance (see services/balance.py);
+    an override replaces that - for when the logged expenses don't add up to
+    the real account balance - and the later months roll forward from it."""
+
+    __tablename__ = "month_opening_balances"
+
+    id = Column(Integer, primary_key=True)
+    month = Column(String, nullable=False, unique=True)  # "YYYY-MM"
+    amount_cents = Column(Integer, nullable=False)  # signed
+    note = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AppSetting(Base):
+    """Tiny key/value store for app-level settings (e.g. the month the
+    balance rollover chain starts)."""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+
+
 class Scenario(Base):
     """A saved "what-if" - a named bundle of adjustments layered over the
     real recurring items at query time. Nothing here ever mutates a

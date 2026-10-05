@@ -428,6 +428,12 @@ class UntilPaycheck(BaseModel):
     on_payday: List[DatedPayment] = []  # money out dated the paycheck day itself
     on_payday_total_cents: int = 0
     undated: List[UndatedItem] = []  # recurring money-out we couldn't place on a date
+    # The household balance (opening balance rolled over + everything dated
+    # so far): now, and just before / right after the next paycheck lands.
+    balance_now_cents: int = 0
+    income_before_cents: int = 0  # other income landing before the paycheck
+    balance_before_payday_cents: Optional[int] = None
+    balance_after_payday_cents: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -633,8 +639,30 @@ class ScenarioMonthResult(MonthSide):
     normalized_delta: MonthTotals  # provisioning change (where fund adjustments land)
 
 
+class OpeningBalance(BaseModel):
+    """What the month opens with. `computed_cents` is last month's closing
+    balance rolled over (0 at the start of the chain); `override_cents` is a
+    manual replacement. The household's balance, never filtered."""
+
+    month: str
+    computed_cents: int
+    override_cents: Optional[int] = None
+    note: Optional[str] = None
+    opening_cents: int  # override if set, else computed
+    closing_cents: int  # opening + the month's dated net
+    from_month: Optional[str] = None  # month rolled over from, if any
+
+
+class OpeningBalanceSet(BaseModel):
+    amount_cents: int  # signed: overdrawn is negative
+    note: Optional[str] = None
+
+    _check_note = field_validator("note")(_blank_to_none)
+
+
 class MonthResult(MonthSide):
     month: str
+    opening: Optional[OpeningBalance] = None
     scenario: Optional[ScenarioMonthResult] = None
 
 
