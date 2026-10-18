@@ -132,17 +132,54 @@ let _people = null;
 let _categories = null;
 let _scenarios = null;
 
-async function loadPeople(force) {
-  if (!_people || force) _people = await fetchJSON(`${API}/people`);
+// The promise is cached (not the result) so two callers asking at once - the
+// filters and the paycheck card both want people - share one request.
+function _cachedLoad(current, force, url, reset) {
+  if (current && !force) return current;
+  const p = fetchJSON(url);
+  p.catch(reset); // don't keep a failed request cached
+  return p;
+}
+function loadPeople(force) {
+  _people = _cachedLoad(_people, force, `${API}/people`, () => { _people = null; });
   return _people;
 }
-async function loadCategories(force) {
-  if (!_categories || force) _categories = await fetchJSON(`${API}/categories`);
+function loadCategories(force) {
+  _categories = _cachedLoad(_categories, force, `${API}/categories`, () => { _categories = null; });
   return _categories;
 }
-async function loadScenarios(force) {
-  if (!_scenarios || force) _scenarios = await fetchJSON(`${API}/scenarios`);
+function loadScenarios(force) {
+  _scenarios = _cachedLoad(_scenarios, force, `${API}/scenarios`, () => { _scenarios = null; });
   return _scenarios;
+}
+
+// --- loading states ------------------------------------------------------
+
+// A spinner over a section while its data is on the way. An empty section
+// (first load) shows it straight away; one that already has content (a
+// refresh) is only dimmed with a spinner if the wait passes 250ms, so quick
+// refreshes don't flicker. Render code usually clears the section itself,
+// but hideLoading() must still run to drop the state.
+const _loadTimers = new WeakMap();
+
+function showLoading(target) {
+  if (!target) return;
+  clearTimeout(_loadTimers.get(target));
+  const apply = () => {
+    target.classList.add("fin-loading");
+    if (!target.querySelector(":scope > .fin-spinner")) {
+      target.appendChild(el("div", { class: "fin-spinner", role: "status", "aria-label": "Loading" }));
+    }
+  };
+  if (target.firstElementChild) _loadTimers.set(target, setTimeout(apply, 250));
+  else apply();
+}
+
+function hideLoading(target) {
+  if (!target) return;
+  clearTimeout(_loadTimers.get(target));
+  target.classList.remove("fin-loading");
+  target.querySelectorAll(":scope > .fin-spinner").forEach((n) => n.remove());
 }
 
 // Populate a <select> with {value,label} options, keeping any current

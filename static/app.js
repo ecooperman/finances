@@ -427,6 +427,29 @@ function totalsBlock(title, totals, { muted } = {}) {
   ]);
 }
 
+// The funds / trips line under the totals. It has its own request (trips
+// come from the trip-planning app and can be slow), so it fills in whenever
+// it arrives instead of holding up the rest of the page.
+function renderStatus() {
+  const slot = document.getElementById("fin-status");
+  if (!slot) return;
+  slot.classList.remove("fin-loading-inline");
+  if (STATUS_LOADING) {
+    slot.textContent = "Loading funds & trips…";
+    slot.classList.add("fin-loading-inline");
+    slot.classList.remove("hidden");
+    return;
+  }
+  const f = FUNDS_STATUS;
+  slot.classList.toggle("hidden", !f);
+  if (!f) return;
+  let text = `Funds: ${f.active_count} active · ${fmtMoney(f.monthly_total_cents)}/mo set aside · ${fmtMoney(f.banked_total_cents)} banked`;
+  if (TRIPS_STATUS && TRIPS_STATUS.upcoming_count) {
+    text += `  ·  Trips: ${TRIPS_STATUS.upcoming_count} upcoming, ${fmtMoney(TRIPS_STATUS.monthly_total_cents)}/mo`;
+  }
+  slot.textContent = text;
+}
+
 function renderTotals(data) {
   totalsEl.innerHTML = "";
   totalsEl.appendChild(totalsBlock("This month (cash flow)", data.totals));
@@ -436,14 +459,9 @@ function renderTotals(data) {
       el("strong", { text: fmtSignedMoney(data.normalized.net_cents) }),
     ])
   );
-  if (FUNDS_STATUS) {
-    const f = FUNDS_STATUS;
-    let text = `Funds: ${f.active_count} active · ${fmtMoney(f.monthly_total_cents)}/mo set aside · ${fmtMoney(f.banked_total_cents)} banked`;
-    if (TRIPS_STATUS && TRIPS_STATUS.upcoming_count) {
-      text += `  ·  Trips: ${TRIPS_STATUS.upcoming_count} upcoming, ${fmtMoney(TRIPS_STATUS.monthly_total_cents)}/mo`;
-    }
-    totalsEl.appendChild(el("p", { class: "fin-normalized", text }));
-  }
+  // the funds/trips line loads on its own request; renderStatus() fills this
+  totalsEl.appendChild(el("p", { id: "fin-status", class: "fin-normalized hidden" }));
+  renderStatus();
 
   if (data.scenario) {
     totalsEl.appendChild(totalsBlock(`Scenario: ${data.scenario.name}`, data.scenario.totals));
@@ -475,17 +493,33 @@ function buildQuery() {
 
 let FUNDS_STATUS = null;
 let TRIPS_STATUS = null;
+let STATUS_LOADING = false;
 
-async function render() {
+// The page's data comes from four independent requests - the month, the
+// funds/trips line, the "until next paycheck" card and the "today" card.
+// They all start together and each fills its own section (with its own
+// spinner) as soon as it arrives. A sequence number per loader drops a slow
+// response for a month you've already stepped away from.
+let monthSeq = 0;
+let statusSeq = 0;
+
+function render() {
   monthLabelEl.textContent = monthLabel(state.month);
+  const month = loadMonth();
+  loadStatus();
+  loadPaycheck();
+  loadToday();
+  return month; // callers that re-open a day modal only need the month data
+}
+
+async function loadMonth() {
+  const seq = ++monthSeq;
+  const calendarEl = document.getElementById("calendar");
+  const sections = [calendarEl, inList, outList, totalsEl];
+  sections.forEach(showLoading);
   try {
-    const [data, fundsSummary, tripsSummary] = await Promise.all([
-      fetchJSON(`${API}/monthly?${buildQuery()}`),
-      fetchJSON(`${API}/funds/summary?month=${state.month}`).catch(() => null),
-      fetchJSON(`${API}/trips/summary?month=${state.month}`).catch(() => null),
-    ]);
-    FUNDS_STATUS = fundsSummary;
-    TRIPS_STATUS = tripsSummary;
+    const data = await fetchJSON(`${API}/monthly?${buildQuery()}`);
+    if (seq !== monthSeq) return;
     const inRows = data.scenario ? data.scenario.money_in : data.money_in;
     const outRows = data.scenario ? data.scenario.money_out : data.money_out;
     // the balance is the household's, so it's only shown unfiltered
@@ -496,11 +530,26 @@ async function render() {
     inCount.textContent = `${inRows.length} item${inRows.length === 1 ? "" : "s"}`;
     outCount.textContent = `${outRows.length} item${outRows.length === 1 ? "" : "s"}`;
     renderTotals(data);
-    loadPaycheck();
-    loadToday();
   } catch (err) {
-    Global.showMessage(err.message, "error");
+    if (seq === monthSeq) Global.showMessage(err.message, "error");
+  } finally {
+    if (seq === monthSeq) sections.forEach(hideLoading);
   }
+}
+
+async function loadStatus() {
+  const seq = ++statusSeq;
+  STATUS_LOADING = true;
+  renderStatus();
+  const [funds, trips] = await Promise.all([
+    fetchJSON(`${API}/funds/summary?month=${state.month}`).catch(() => null),
+    fetchJSON(`${API}/trips/summary?month=${state.month}`).catch(() => null),
+  ]);
+  if (seq !== statusSeq) return;
+  FUNDS_STATUS = funds;
+  TRIPS_STATUS = trips;
+  STATUS_LOADING = false;
+  renderStatus();
 }
 
 // --- filters -------------------------------------------------------------
@@ -604,12 +653,6 @@ addForm.addEventListener("submit", async (e) => {
   }
 });
 
-// --- go ----------------------------------------------------------------
-
-initFilters().then(() => {
-  buildAddForm();
-  render();
-});
 
 
 // --- day detail modal (click a calendar day) ---
@@ -878,16 +921,24 @@ function balanceRow(label, cents, { strong = false } = {}) {
   ]);
 }
 
+let paycheckSeq = 0;
+
 async function loadPaycheck() {
+  const seq = ++paycheckSeq;
   const p = new URLSearchParams({ on: localISODate() });
   if (paycheckPersonSelect.value) p.set("person_id", paycheckPersonSelect.value);
+  showLoading(paycheckBody);
   let d;
   try {
     d = await fetchJSON(`${API}/until-paycheck?${p.toString()}`);
   } catch (err) {
+    if (seq !== paycheckSeq) return;
+    hideLoading(paycheckBody);
     paycheckBody.textContent = "Couldn't load the paycheck lookahead.";
     return;
   }
+  if (seq !== paycheckSeq) return;
+  hideLoading(paycheckBody);
   paycheckBody.innerHTML = "";
 
   if (!d.next_paycheck) {
@@ -962,14 +1013,35 @@ initPaycheck();
 const todayCard = document.getElementById("today-card");
 const todayBody = document.getElementById("today-body");
 
+let todaySeq = 0;
+// The card only exists if there are daily-spread items. Remember that between
+// visits so it can show a spinner while loading instead of popping in later.
+const TODAY_KEY = "finances.hasDailyItems";
+function hadDailyItems() {
+  try { return localStorage.getItem(TODAY_KEY) === "1"; } catch (e) { return false; }
+}
+function rememberDailyItems(has) {
+  try { localStorage.setItem(TODAY_KEY, has ? "1" : "0"); } catch (e) { /* private mode */ }
+}
+
 async function loadToday() {
+  const seq = ++todaySeq;
+  if (hadDailyItems()) {
+    todayCard.classList.remove("hidden");
+    showLoading(todayBody);
+  }
   let d;
   try {
     d = await fetchJSON(`${API}/daily-budget?on=${localISODate()}`);
   } catch (err) {
+    if (seq !== todaySeq) return;
+    hideLoading(todayBody);
     todayCard.classList.add("hidden");
     return;
   }
+  if (seq !== todaySeq) return;
+  hideLoading(todayBody);
+  rememberDailyItems(d.items.length > 0);
   todayBody.innerHTML = "";
   todayCard.classList.toggle("hidden", !d.items.length);
   document.getElementById("today-date").textContent = fmtLongDate(d.as_of);
@@ -1004,3 +1076,12 @@ function todayItem(it, asOf) {
     el("div", { class: "fin-today-month", text: month }),
   ]);
 }
+
+
+// --- go (last, so every const/let above is initialised) ----------------
+
+// Nothing on the page needs the filter lists to load first (they only matter
+// once you change a filter), so the data requests start right away instead
+// of queueing behind them.
+initFilters().then(buildAddForm);
+render();
