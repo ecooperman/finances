@@ -153,34 +153,8 @@ function loadScenarios(force) {
   return _scenarios;
 }
 
-// --- loading states ------------------------------------------------------
-
-// A spinner over a section while its data is on the way. An empty section
-// (first load) shows it straight away; one that already has content (a
-// refresh) is only dimmed with a spinner if the wait passes 250ms, so quick
-// refreshes don't flicker. Render code usually clears the section itself,
-// but hideLoading() must still run to drop the state.
-const _loadTimers = new WeakMap();
-
-function showLoading(target) {
-  if (!target) return;
-  clearTimeout(_loadTimers.get(target));
-  const apply = () => {
-    target.classList.add("fin-loading");
-    if (!target.querySelector(":scope > .fin-spinner")) {
-      target.appendChild(el("div", { class: "fin-spinner", role: "status", "aria-label": "Loading" }));
-    }
-  };
-  if (target.firstElementChild) _loadTimers.set(target, setTimeout(apply, 250));
-  else apply();
-}
-
-function hideLoading(target) {
-  if (!target) return;
-  clearTimeout(_loadTimers.get(target));
-  target.classList.remove("fin-loading");
-  target.querySelectorAll(":scope > .fin-spinner").forEach((n) => n.remove());
-}
+// Loading spinners (showLoading/hideLoading/withLoading) live in shared-assets -
+// call them as Global.showLoading(el) etc. (see theme.js / theme.css).
 
 // Populate a <select> with {value,label} options, keeping any current
 // selection if it still exists.

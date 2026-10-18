@@ -433,10 +433,10 @@ function totalsBlock(title, totals, { muted } = {}) {
 function renderStatus() {
   const slot = document.getElementById("fin-status");
   if (!slot) return;
-  slot.classList.remove("fin-loading-inline");
+  slot.classList.remove("loading-inline");
   if (STATUS_LOADING) {
     slot.textContent = "Loading funds & trips…";
-    slot.classList.add("fin-loading-inline");
+    slot.classList.add("loading-inline");
     slot.classList.remove("hidden");
     return;
   }
@@ -516,7 +516,7 @@ async function loadMonth() {
   const seq = ++monthSeq;
   const calendarEl = document.getElementById("calendar");
   const sections = [calendarEl, inList, outList, totalsEl];
-  sections.forEach(showLoading);
+  sections.forEach(Global.showLoading);
   try {
     const data = await fetchJSON(`${API}/monthly?${buildQuery()}`);
     if (seq !== monthSeq) return;
@@ -533,7 +533,7 @@ async function loadMonth() {
   } catch (err) {
     if (seq === monthSeq) Global.showMessage(err.message, "error");
   } finally {
-    if (seq === monthSeq) sections.forEach(hideLoading);
+    if (seq === monthSeq) sections.forEach(Global.hideLoading);
   }
 }
 
@@ -927,18 +927,18 @@ async function loadPaycheck() {
   const seq = ++paycheckSeq;
   const p = new URLSearchParams({ on: localISODate() });
   if (paycheckPersonSelect.value) p.set("person_id", paycheckPersonSelect.value);
-  showLoading(paycheckBody);
+  Global.showLoading(paycheckBody);
   let d;
   try {
     d = await fetchJSON(`${API}/until-paycheck?${p.toString()}`);
   } catch (err) {
     if (seq !== paycheckSeq) return;
-    hideLoading(paycheckBody);
+    Global.hideLoading(paycheckBody);
     paycheckBody.textContent = "Couldn't load the paycheck lookahead.";
     return;
   }
   if (seq !== paycheckSeq) return;
-  hideLoading(paycheckBody);
+  Global.hideLoading(paycheckBody);
   paycheckBody.innerHTML = "";
 
   if (!d.next_paycheck) {
@@ -1028,19 +1028,19 @@ async function loadToday() {
   const seq = ++todaySeq;
   if (hadDailyItems()) {
     todayCard.classList.remove("hidden");
-    showLoading(todayBody);
+    Global.showLoading(todayBody);
   }
   let d;
   try {
     d = await fetchJSON(`${API}/daily-budget?on=${localISODate()}`);
   } catch (err) {
     if (seq !== todaySeq) return;
-    hideLoading(todayBody);
+    Global.hideLoading(todayBody);
     todayCard.classList.add("hidden");
     return;
   }
   if (seq !== todaySeq) return;
-  hideLoading(todayBody);
+  Global.hideLoading(todayBody);
   rememberDailyItems(d.items.length > 0);
   todayBody.innerHTML = "";
   todayCard.classList.toggle("hidden", !d.items.length);
