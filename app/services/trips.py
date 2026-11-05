@@ -16,7 +16,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..config import TRIPS_API_BASE
+from ..config import TRIPS_API_BASE, TRIPS_SERVICE_TOKEN
 from .funds import current_month, months_elapsed
 
 log = logging.getLogger(__name__)
@@ -33,7 +33,8 @@ def fetch_trip_costs() -> List[dict]:
     if _cache["data"] is not None and now - _cache["at"] < _CACHE_TTL_SECONDS:
         return _cache["data"]
     try:
-        resp = httpx.get(f"{TRIPS_API_BASE}/api/trips/cost-summary", timeout=2.0)
+        headers = {"X-Service-Token": TRIPS_SERVICE_TOKEN} if TRIPS_SERVICE_TOKEN else {}
+        resp = httpx.get(f"{TRIPS_API_BASE}/api/trips/cost-summary", headers=headers, timeout=2.0)
         resp.raise_for_status()
         data = resp.json()
         if not isinstance(data, list):
