@@ -704,7 +704,8 @@
 
 .fin-paycheck-who select {
   width: auto;
-  padding: 4px 8px;
+  padding: 4px 28px 4px 8px; /* right side leaves room for the dropdown chevron */
+  background-position: right 9px center;
   font-size: 13px;
 }
 
