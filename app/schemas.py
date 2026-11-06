@@ -21,7 +21,7 @@ AdjustmentKind = Literal["add", "remove", "modify"]
 # Only these need an anchor_month (they land in specific calendar months);
 # weekly/biweekly/monthly land every month.
 SUBMONTHLY_FREQUENCIES = {"quarterly", "semiannual", "annual"}
-AddKind = Literal["recurring", "fund"]
+AddKind = Literal["recurring", "fund", "one_time"]
 FundEntryUnit = Literal["year", "month", "weeks", "months", "times_year"]
 
 
@@ -444,13 +444,17 @@ class UntilPaycheck(BaseModel):
 def _check_adjustment_shape(obj):
     """Per-`kind` required-field rules, shared by the create and update
     schemas (both carry the full adjustment body). A remove/modify targets
-    either a recurring item (`target_recurring_id`) or a fund
-    (`target_fund_id`) - exactly one."""
+    exactly one of a recurring item (`target_recurring_id`), a fund
+    (`target_fund_id`) or a one-off transaction (`target_transaction_id`)."""
     if obj.kind == "add":
         if obj.add_kind == "fund":
             missing = [f for f in ("name", "amount_cents") if getattr(obj, f) is None]
             if missing:
                 raise ValueError(f"'add' fund requires: {', '.join(missing)}")
+        elif obj.add_kind == "one_time":
+            missing = [f for f in ("name", "amount_cents", "direction", "date") if getattr(obj, f) is None]
+            if missing:
+                raise ValueError(f"'add' one-time payment requires: {', '.join(missing)}")
         else:
             missing = [f for f in ("name", "amount_cents", "direction") if getattr(obj, f) is None]
             if missing:
@@ -459,12 +463,11 @@ def _check_adjustment_shape(obj):
                 raise ValueError("anchor_month is required for quarterly / semi-annual / annual 'add' adjustments")
         return obj
 
-    has_recurring = obj.target_recurring_id is not None
-    has_fund = obj.target_fund_id is not None
-    if has_recurring == has_fund:
+    targets = [obj.target_recurring_id, obj.target_fund_id, obj.target_transaction_id]
+    if sum(t is not None for t in targets) != 1:
         raise ValueError(
             f"'{obj.kind}' adjustment requires exactly one of "
-            "target_recurring_id / target_fund_id"
+            "target_recurring_id / target_fund_id / target_transaction_id"
         )
     if obj.kind == "modify":
         has_mult = obj.multiplier is not None
@@ -480,19 +483,22 @@ def _check_adjustment_shape(obj):
 
 class ScenarioAdjustmentCreate(BaseModel):
     kind: AdjustmentKind
-    # "add" fields. add_kind picks recurring line vs. sinking fund; for a
-    # fund, amount_cents is the annual rate and direction/frequency are unused.
+    # "add" fields. add_kind picks recurring line vs. sinking fund vs. a
+    # one-time payment on `date`; for a fund, amount_cents is the annual rate
+    # and direction/frequency are unused.
     add_kind: AddKind = "recurring"
     name: Optional[str] = None
     amount_cents: Optional[int] = None
     direction: Optional[Direction] = None
     frequency: Optional[Frequency] = "monthly"
     anchor_month: Optional[int] = None
+    date: Optional[date_type] = None
     category_id: Optional[int] = None
     person_id: Optional[int] = None
     # "remove" / "modify" fields - target exactly one of these
     target_recurring_id: Optional[int] = None
     target_fund_id: Optional[int] = None
+    target_transaction_id: Optional[int] = None
     multiplier: Optional[float] = None
     override_amount_cents: Optional[int] = None
     notes: Optional[str] = None
@@ -523,10 +529,12 @@ class ScenarioAdjustment(BaseModel):
     direction: Optional[str] = None
     frequency: Optional[str] = None
     anchor_month: Optional[int] = None
+    date: Optional[date_type] = None
     category_id: Optional[int] = None
     person_id: Optional[int] = None
     target_recurring_id: Optional[int] = None
     target_fund_id: Optional[int] = None
+    target_transaction_id: Optional[int] = None
     multiplier: Optional[float] = None
     override_amount_cents: Optional[int] = None
     notes: Optional[str] = None
@@ -534,6 +542,7 @@ class ScenarioAdjustment(BaseModel):
     person: Optional[Person] = None
     target_recurring: Optional[RecurringItem] = None
     target_fund: Optional[Fund] = None
+    target_transaction: Optional[Transaction] = None
 
 
 class ScenarioBase(BaseModel):

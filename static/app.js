@@ -927,18 +927,15 @@ async function loadPaycheck() {
   const seq = ++paycheckSeq;
   const p = new URLSearchParams({ on: localISODate() });
   if (paycheckPersonSelect.value) p.set("person_id", paycheckPersonSelect.value);
-  Global.showLoading(paycheckBody);
   let d;
   try {
-    d = await fetchJSON(`${API}/until-paycheck?${p.toString()}`);
+    d = await Global.withLoading(paycheckBody, fetchJSON(`${API}/until-paycheck?${p.toString()}`));
   } catch (err) {
     if (seq !== paycheckSeq) return;
-    Global.hideLoading(paycheckBody);
     paycheckBody.textContent = "Couldn't load the paycheck lookahead.";
     return;
   }
   if (seq !== paycheckSeq) return;
-  Global.hideLoading(paycheckBody);
   paycheckBody.innerHTML = "";
 
   if (!d.next_paycheck) {
@@ -1026,21 +1023,16 @@ function rememberDailyItems(has) {
 
 async function loadToday() {
   const seq = ++todaySeq;
-  if (hadDailyItems()) {
-    todayCard.classList.remove("hidden");
-    Global.showLoading(todayBody);
-  }
+  if (hadDailyItems()) todayCard.classList.remove("hidden");
   let d;
   try {
-    d = await fetchJSON(`${API}/daily-budget?on=${localISODate()}`);
+    d = await Global.withLoading(todayBody, fetchJSON(`${API}/daily-budget?on=${localISODate()}`));
   } catch (err) {
     if (seq !== todaySeq) return;
-    Global.hideLoading(todayBody);
     todayCard.classList.add("hidden");
     return;
   }
   if (seq !== todaySeq) return;
-  Global.hideLoading(todayBody);
   rememberDailyItems(d.items.length > 0);
   todayBody.innerHTML = "";
   todayCard.classList.toggle("hidden", !d.items.length);

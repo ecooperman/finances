@@ -379,7 +379,7 @@ class ScenarioAdjustment(Base):
     id = Column(Integer, primary_key=True)
     scenario_id = Column(Integer, ForeignKey("scenarios.id", ondelete="CASCADE"), nullable=False)
     kind = Column(String, nullable=False)  # "add" | "remove" | "modify"
-    # For kind="add": "recurring" (default) or "fund".
+    # For kind="add": "recurring" (default), "fund" or "one_time".
     add_kind = Column(String, nullable=False, default="recurring", server_default="recurring")
 
     # --- "add" columns ---
@@ -388,6 +388,8 @@ class ScenarioAdjustment(Base):
     direction = Column(String, nullable=True)
     frequency = Column(String, nullable=True, default="monthly")
     anchor_month = Column(Integer, nullable=True)
+    # For add_kind="one_time": the day the hypothetical payment lands.
+    date = Column(Date, nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True)
     person_id = Column(Integer, ForeignKey("people.id", ondelete="SET NULL"), nullable=True)
 
@@ -396,6 +398,10 @@ class ScenarioAdjustment(Base):
         Integer, ForeignKey("recurring_items.id", ondelete="CASCADE"), nullable=True
     )
     target_fund_id = Column(Integer, ForeignKey("funds.id", ondelete="CASCADE"), nullable=True)
+    # a real one-off transaction to remove / modify
+    target_transaction_id = Column(
+        Integer, ForeignKey("transactions.id", ondelete="CASCADE"), nullable=True
+    )
     multiplier = Column(Float, nullable=True)
     override_amount_cents = Column(Integer, nullable=True)
 
@@ -409,3 +415,4 @@ class ScenarioAdjustment(Base):
     person = relationship("Person", lazy="joined")
     target_recurring = relationship("RecurringItem", lazy="joined")
     target_fund = relationship("SinkingFund", lazy="joined")
+    target_transaction = relationship("Transaction", lazy="joined")

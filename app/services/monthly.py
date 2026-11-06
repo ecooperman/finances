@@ -203,15 +203,27 @@ def _trip_rows(db, month, filters) -> List[dict]:
     return rows
 
 
-def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: bool) -> List[dict]:
+def _apply_scenario(db, base_rows, adjustments, year, mon, filters, *, normalized: bool) -> List[dict]:
     """Return a fresh row list with the scenario's adjustments applied.
 
     `remove`d rows are kept but flagged effect="removed" (and excluded from
     totals) so the UI can show what was taken out.
+
+    Changes can target a recurring item, a fund, or a real one-off
+    transaction (cash flow only: one-offs aren't part of provisioning), and a
+    "one_time" add puts a hypothetical payment on its date in that month.
     """
     rows = [dict(r) for r in base_rows]
     by_recurring_id = {r["id"]: r for r in rows if r["kind"] == "recurring"}
     by_fund_id = {r["id"]: r for r in rows if r["kind"] == "fund"}
+    by_txn_id = {r["id"]: r for r in rows if r["kind"] == "transaction"}
+
+    def find_target(adj, is_fund):
+        if is_fund:
+            return by_fund_id.get(adj.target_fund_id)
+        if adj.target_transaction_id is not None:
+            return by_txn_id.get(adj.target_transaction_id)
+        return by_recurring_id.get(adj.target_recurring_id)
 
     for adj in adjustments:
         is_fund = adj.target_fund_id is not None or (
@@ -222,20 +234,12 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
             continue
 
         if adj.kind == "remove":
-            target = (
-                by_fund_id.get(adj.target_fund_id)
-                if is_fund
-                else by_recurring_id.get(adj.target_recurring_id)
-            )
+            target = find_target(adj, is_fund)
             if target is not None and target["effect"] != "deferred":
                 target["effect"] = "removed"
 
         elif adj.kind == "modify":
-            target = (
-                by_fund_id.get(adj.target_fund_id)
-                if is_fund
-                else by_recurring_id.get(adj.target_recurring_id)
-            )
+            target = find_target(adj, is_fund)
             if target is None or target["effect"] in ("removed", "deferred"):
                 continue
             original = target["amount_cents"]
@@ -282,6 +286,14 @@ def _apply_scenario(db, base_rows, adjustments, mon, filters, *, normalized: boo
                 rows.append(_row(
                     "fund", -adj.id, adj.name, round(adj.amount_cents / 12), "out",
                     category=_cat(cat), person=_person(per), effect="added",
+                ))
+            elif getattr(adj, "add_kind", "recurring") == "one_time":
+                # a hypothetical one-off: cash flow only, and only in its own month
+                if normalized or adj.date is None or (adj.date.year, adj.date.month) != (year, mon):
+                    continue
+                rows.append(_row(
+                    "transaction", -adj.id, adj.name, adj.amount_cents, adj.direction,
+                    day=adj.date.day, category=_cat(cat), person=_person(per), effect="added",
                 ))
             else:
                 freq = adj.frequency or "monthly"
@@ -420,9 +432,9 @@ def compute_month(
         scenario = db.get(models.Scenario, scenario_id)
         if scenario is not None:
             adjustments = scenario.adjustments
-            s_actual = _apply_scenario(db, actual, adjustments, mon, filters, normalized=False)
+            s_actual = _apply_scenario(db, actual, adjustments, year, mon, filters, normalized=False)
             s_normalized = _apply_scenario(
-                db, normalized, adjustments, mon, filters, normalized=True
+                db, normalized, adjustments, year, mon, filters, normalized=True
             )
             s_side = _side(s_actual, s_normalized)
 

@@ -26,7 +26,7 @@ follow-up - see [`SYNC.md`](SYNC.md).
 |---|---|
 | `/` (Overview) | Month stepper + person/category/scenario filters; a **payment calendar** (a one-month grid built from the same filtered data); money-in / money-out lists with a cash-flow net, a **Provisioned** figure (recurring smoothed + funds + trips), and a funds/trips status line. Read-only rollup + a unified "+ Add". |
 | `/budget.html` | The one place to add and manage every money event. Segmented view (All / Recurring / One-time) over person/category/status/month filters; always-visible **Funds** and **Trips** sections; accordion cards for edit. Footer shows the provisioning baseline. |
-| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments - targeting recurring items **or** funds. "Open in Overview" applies one. |
+| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments - adding a recurring line, a **one-time payment on a date** or a fund, and removing / scaling a recurring item, a fund **or a real one-off transaction**. "Open in Overview" applies one. |
 | `/settings.html` | Manage the People and Category reference lists. |
 
 **Adding an entry**: one "+ Add" form (Overview + Budget) with a
@@ -77,9 +77,10 @@ Plain JSON REST under `/api` (`/docs` for Swagger):
   `balance_cents`, `spent_ytd_cents`; `GET /api/funds/summary` for the
   fleet roll-up. Balance math lives in `app/services/funds.py`.
 - `/api/scenarios` - CRUD; `POST /api/scenarios/{id}/adjustments`;
-  `PATCH`/`DELETE /api/adjustments/{id}`. Adjustments target
-  `target_recurring_id` **or** `target_fund_id`; a fund `add` uses
-  `add_kind: "fund"`.
+  `PATCH`/`DELETE /api/adjustments/{id}`. A remove/modify targets exactly
+  one of `target_recurring_id`, `target_fund_id` or
+  `target_transaction_id`; an `add` has `add_kind` `"recurring"` (default),
+  `"fund"` or `"one_time"` (needs `date`, `direction`, `amount_cents`).
 - `/api/trips` - the trip forecast (`{upcoming, no_date, excluded}`);
   `GET /api/trips/summary`; `PATCH /api/trips/{trip_id}` (exclude /
   override); `POST /api/trips/{trip_id}/settle` and `/unsettle`. Costs come
@@ -308,8 +309,15 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   the rest of the app is unaffected. A trip with no `start_date` in
   trip-planning is listed but left out of the monthly math.
 - **Scenarios never mutate stored rows** - `app/services/monthly.py`
-  applies adjustments to in-memory copies per request. Recurring/one-off
-  adjustments move `totals` (cash flow); fund adjustments move `normalized`
-  (provisioning) - see `scenario.delta` vs `scenario.normalized_delta`.
+  applies adjustments to in-memory copies per request. Recurring and
+  one-off adjustments (a hypothetical one-time payment, or removing /
+  scaling a real transaction) move `totals` (cash flow); fund adjustments
+  move `normalized` (provisioning) - one-offs never do, matching how
+  provisioning already excludes them. See `scenario.delta` vs
+  `scenario.normalized_delta`. A one-time payment shows only in the month
+  its date falls in, as a dated "added" line; a change that targets a
+  transaction in another month is a no-op there; a carried-over one-off is
+  left alone; deleting a transaction deletes the changes that target it.
+  Scenarios don't change the rollover balance.
 - **`person_id` NULL = joint / whole household** (shown as a "Joint"
   badge), not "unknown".

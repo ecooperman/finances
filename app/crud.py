@@ -234,11 +234,19 @@ def update_transaction(db: Session, txn_id: int, updates: schemas.TransactionUpd
     return db_txn
 
 
+def _clear_transaction_refs(db: Session, txn_id: int) -> None:
+    """A transaction is going away: drop what points at it (carry-overs and
+    scenario changes that target it). SQLite isn't enforcing FK cascades, so
+    this is done by hand. Doesn't commit."""
+    deferrals.clear_for(db, transaction_id=txn_id)
+    db.query(models.ScenarioAdjustment).filter_by(target_transaction_id=txn_id).delete()
+
+
 def delete_transaction(db: Session, txn_id: int) -> bool:
     db_txn = get_transaction(db, txn_id)
     if db_txn is None:
         return False
-    deferrals.clear_for(db, transaction_id=txn_id)
+    _clear_transaction_refs(db, txn_id)
     db.delete(db_txn)
     db.commit()
     return True
@@ -266,7 +274,7 @@ def convert_transaction_to_recurring(db: Session, txn_id: int, opts: schemas.Con
         active=True,
     )
     db.add(item)
-    deferrals.clear_for(db, transaction_id=txn.id)
+    _clear_transaction_refs(db, txn.id)
     db.delete(txn)
     db.commit()
     db.refresh(item)
@@ -416,7 +424,7 @@ def unsettle_trip(db: Session, trip_id: int):
     if s.settled_transaction_id is not None:
         txn = get_transaction(db, s.settled_transaction_id)
         if txn is not None:
-            deferrals.clear_for(db, transaction_id=txn.id)
+            _clear_transaction_refs(db, txn.id)
             db.delete(txn)
     s.settled_at = None
     s.settled_transaction_id = None
@@ -491,8 +499,8 @@ def update_adjustment(db: Session, adjustment_id: int, adj: schemas.ScenarioAdju
     payload = adj.model_dump()
     for field in (
         "kind", "add_kind", "name", "amount_cents", "direction", "frequency", "anchor_month",
-        "category_id", "person_id", "target_recurring_id", "target_fund_id", "multiplier",
-        "override_amount_cents", "notes",
+        "date", "category_id", "person_id", "target_recurring_id", "target_fund_id",
+        "target_transaction_id", "multiplier", "override_amount_cents", "notes",
     ):
         setattr(db_adj, field, payload.get(field))
     db.commit()

@@ -1,6 +1,7 @@
 // Scenarios - saved "what-if" bundles. Each adjustment adds a hypothetical
-// recurring line or sinking fund, or removes / scales an existing one.
-// Recurring/one-off adjustments move the Overview's cash-flow net; fund
+// recurring line, one-time payment (on a date) or sinking fund, or removes /
+// scales an existing recurring item, fund or real one-off transaction.
+// Recurring and one-time adjustments move the Overview's cash-flow net; fund
 // adjustments move its provisioned net. Adjustments are add + delete here;
 // editing one = delete and re-add.
 
@@ -13,11 +14,16 @@ let PEOPLE = [];
 let CATEGORIES = [];
 let RECURRING = [];
 let FUNDS = [];
+let TRANSACTIONS = []; // recent + upcoming one-offs, for the remove/modify picker
 
 // MONTH_OPTIONS comes from common.js (loaded first).
 const recurringName = (id) => {
   const r = RECURRING.find((x) => x.id === id);
   return r ? r.name : `item #${id}`;
+};
+const transactionName = (a) => {
+  const t = a.target_transaction || TRANSACTIONS.find((x) => x.id === a.target_transaction_id);
+  return t ? `${t.description} (${t.date})` : `one-time #${a.target_transaction_id}`;
 };
 const fundName = (id) => {
   const f = FUNDS.find((x) => x.id === id);
@@ -56,9 +62,15 @@ addForm.addEventListener("submit", async (e) => {
 // --- adjustment description --------------------------------------
 
 function describeAdjustment(a) {
-  const targetName = a.target_fund_id != null ? `${fundName(a.target_fund_id)} (fund)` : recurringName(a.target_recurring_id);
+  const targetName =
+    a.target_fund_id != null ? `${fundName(a.target_fund_id)} (fund)`
+    : a.target_transaction_id != null ? transactionName(a)
+    : recurringName(a.target_recurring_id);
   if (a.kind === "add") {
     if (a.add_kind === "fund") return `Add fund "${a.name}" — ${fmtMoney(a.amount_cents)}/yr set aside`;
+    if (a.add_kind === "one_time") {
+      return `Add one-time "${a.name}" — ${fmtMoney(a.amount_cents)} ${a.direction === "in" ? "in" : "out"} on ${a.date}`;
+    }
     const bits = [freqLabel(a.frequency || "monthly").toLowerCase(), a.direction === "in" ? "in" : "out"];
     return `Add "${a.name}" — ${fmtMoney(a.amount_cents)} ${bits.join(" ")}`;
   }
@@ -79,8 +91,8 @@ function adjustmentFormHTML() {
       <label>Change type</label>
       <select name="kind">
         ${opt("add", "Add a new line")}
-        ${opt("remove", "Remove an existing recurring item")}
-        ${opt("modify", "Scale / override an existing recurring item")}
+        ${opt("remove", "Remove an existing item or one-time payment")}
+        ${opt("modify", "Scale / override an existing item or one-time payment")}
       </select>
     </div>
 
@@ -88,7 +100,7 @@ function adjustmentFormHTML() {
       <div class="field-row">
         <div class="field">
           <label>Add a</label>
-          <select name="add_kind">${opt("recurring", "Recurring line")}${opt("fund", "Sinking fund")}</select>
+          <select name="add_kind">${opt("recurring", "Recurring line")}${opt("one_time", "One-time payment")}${opt("fund", "Sinking fund")}</select>
         </div>
         <div class="field">
           <label>Name</label>
@@ -105,7 +117,13 @@ function adjustmentFormHTML() {
           <select name="direction">${opt("out", "Money out")}${opt("in", "Money in")}</select>
         </div>
       </div>
-      <div class="field-row fin-adj-recurring-only">
+      <div class="field-row fin-adj-onetime-only hidden">
+        <div class="field">
+          <label>Date</label>
+          <input name="date" type="date" />
+        </div>
+      </div>
+      <div class="field-row fin-adj-freq-only">
         <div class="field">
           <label>Frequency</label>
           <select name="frequency">
@@ -131,7 +149,7 @@ function adjustmentFormHTML() {
 
     <div class="fin-adj-group hidden" data-group="target">
       <div class="field">
-        <label>Which item or fund</label>
+        <label>Which item, fund or one-time payment</label>
         <select name="target"></select>
       </div>
     </div>
@@ -161,7 +179,9 @@ function wireAdjustmentForm(form, scenarioId) {
   const freq = form.querySelector('[name="frequency"]');
   const anchorField = form.querySelector(".fin-anchor-field");
   const addAmountLabel = form.querySelector('[data-label="add_amount"]');
-  const recurringOnly = form.querySelectorAll(".fin-adj-recurring-only");
+  const recurringOnly = form.querySelectorAll(".fin-adj-recurring-only"); // hidden for a fund
+  const freqOnly = form.querySelector(".fin-adj-freq-only"); // hidden for a fund / one-time
+  const oneTimeOnly = form.querySelector(".fin-adj-onetime-only");
   const modifyMode = form.querySelector('[name="modify_mode"]');
   const modifyLabel = form.querySelector('[data-label="modify_value"]');
   const groups = form.querySelectorAll(".fin-adj-group");
@@ -173,6 +193,10 @@ function wireAdjustmentForm(form, scenarioId) {
     [
       ...RECURRING.map((r) => ({ value: `r:${r.id}`, label: `${r.name} (${fmtMoney(r.amount_cents)} ${r.direction})` })),
       ...FUNDS.map((f) => ({ value: `f:${f.id}`, label: `${f.name} — fund` })),
+      ...TRANSACTIONS.map((t) => ({
+        value: `t:${t.id}`,
+        label: `${t.date} · ${t.description} (${fmtMoney(t.amount_cents)} ${t.direction}) — one-time`,
+      })),
     ],
     { blankLabel: "— pick one —" }
   );
@@ -185,9 +209,12 @@ function wireAdjustmentForm(form, scenarioId) {
       g.classList.toggle("hidden", !show);
     });
     const isFund = addKind.value === "fund";
+    const isOneTime = addKind.value === "one_time";
     recurringOnly.forEach((n) => n.classList.toggle("hidden", isFund));
+    freqOnly.classList.toggle("hidden", isFund || isOneTime);
+    oneTimeOnly.classList.toggle("hidden", !isOneTime);
     addAmountLabel.textContent = isFund ? "Amount ($) per year" : "Amount ($)";
-    anchorField.classList.toggle("hidden", isFund || !isSubMonthlyFreq(freq.value));
+    anchorField.classList.toggle("hidden", isFund || isOneTime || !isSubMonthlyFreq(freq.value));
     modifyLabel.textContent = modifyMode.value === "multiplier" ? "Factor (e.g. 0.5)" : "Amount ($)";
   };
   kind.addEventListener("change", sync);
@@ -202,17 +229,22 @@ function wireAdjustmentForm(form, scenarioId) {
     const k = g("kind").value;
     let body = { kind: k };
     if (k === "add") {
-      const isFund = g("add_kind").value === "fund";
+      const addKindValue = g("add_kind").value;
+      const isFund = addKindValue === "fund";
+      const isOneTime = addKindValue === "one_time";
       body = {
         kind: "add",
-        add_kind: isFund ? "fund" : "recurring",
+        add_kind: addKindValue,
         name: g("name").value.trim(),
         amount_cents: dollarsToCents(g("amount").value),
         category_id: g("category_id").value || null,
         person_id: g("person_id").value || null,
       };
-      if (!isFund) {
-        body.direction = g("direction").value;
+      if (!isFund) body.direction = g("direction").value;
+      if (isOneTime) {
+        body.date = g("date").value;
+        if (!body.date) return Global.showMessage("A one-time payment needs a date.", "error");
+      } else if (!isFund) {
         body.frequency = g("frequency").value;
         body.anchor_month = isSubMonthlyFreq(g("frequency").value) ? Number(g("anchor_month").value) : null;
       }
@@ -221,9 +253,10 @@ function wireAdjustmentForm(form, scenarioId) {
       }
     } else {
       const raw = g("target").value;
-      if (!raw) return Global.showMessage("Pick an item or fund.", "error");
+      if (!raw) return Global.showMessage("Pick an item, fund or one-time payment.", "error");
       const [prefix, id] = raw.split(":");
-      body[prefix === "f" ? "target_fund_id" : "target_recurring_id"] = Number(id);
+      const targetField = { f: "target_fund_id", t: "target_transaction_id", r: "target_recurring_id" }[prefix];
+      body[targetField] = Number(id);
       if (k === "modify") {
         if (g("modify_mode").value === "multiplier") {
           const mult = Number(g("modify_value").value);
@@ -366,13 +399,19 @@ function card(scenario) {
 
 async function load() {
   try {
-    const [scenarios, recurring, funds] = await Promise.all([
+    // one-offs from the last 6 months on (a scenario about something older is rare)
+    const since = new Date();
+    since.setDate(since.getDate() - 180);
+    const sinceISO = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, "0")}-${String(since.getDate()).padStart(2, "0")}`;
+    const [scenarios, recurring, funds, transactions] = await Promise.all([
       fetchJSON(`${API}/scenarios`),
       fetchJSON(`${API}/recurring`),
       fetchJSON(`${API}/funds`),
+      fetchJSON(`${API}/transactions?date_from=${sinceISO}`),
     ]);
     RECURRING = recurring;
     FUNDS = funds;
+    TRANSACTIONS = transactions.sort((a, b) => (a.date < b.date ? 1 : -1)); // newest first
     listEl.innerHTML = "";
     scenarios.forEach((s) => listEl.appendChild(card(s)));
     emptyEl.classList.toggle("hidden", scenarios.length > 0);
