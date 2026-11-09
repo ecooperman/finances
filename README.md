@@ -321,3 +321,8 @@ upgrade head`, and restarts the service. Needs these repo secrets set once
   Scenarios don't change the rollover balance.
 - **`person_id` NULL = joint / whole household** (shown as a "Joint"
   badge), not "unknown".
+
+## To do
+
+The running to-do list for all projects is `../TODO.md` (in the personal-projects
+folder, one level up; not in git).
