@@ -212,3 +212,43 @@ def test_the_total_is_in_the_scenario_list_too(client):
     _add_one_time(client, sid, "Truck", 240_000, "2026-12-15")
     listed = next(s for s in client.get("/api/scenarios").json() if s["id"] == sid)
     assert listed["one_time"]["cost_cents"] == 240_000
+
+
+# --- editing a line (the page re-sends the whole line) ----------------------
+
+
+def _one_time_body(name, cents, day, direction="out"):
+    return {"kind": "add", "add_kind": "one_time", "name": name, "amount_cents": cents,
+            "direction": direction, "date": day}
+
+
+def test_editing_a_one_time_line_changes_the_total_and_the_month(client):
+    sid = client.post("/api/scenarios", json={"name": "Move"}).json()["id"]
+    adj = client.post(f"/api/scenarios/{sid}/adjustments", json=_one_time_body("Truck", 240_000, "2026-12-15")).json()
+    r = client.patch(f"/api/adjustments/{adj['id']}", json=_one_time_body("Bigger truck", 300_000, "2027-01-03"))
+    assert r.status_code == 200 and r.json()["name"] == "Bigger truck"
+    one_time = client.get(f"/api/scenarios/{sid}").json()["one_time"]
+    assert one_time["cost_cents"] == 300_000
+    assert one_time["by_month"] == [{"month": "2027-01", "out_cents": 300_000, "in_cents": 0}]
+
+
+def test_turning_a_one_time_line_into_a_recurring_one_drops_it_from_the_total(client):
+    sid = client.post("/api/scenarios", json={"name": "Move"}).json()["id"]
+    adj = client.post(f"/api/scenarios/{sid}/adjustments", json=_one_time_body("Rent", 250_000, "2026-12-15")).json()
+    r = client.patch(f"/api/adjustments/{adj['id']}", json={
+        "kind": "add", "add_kind": "recurring", "name": "Rent", "amount_cents": 250_000, "direction": "out",
+        "frequency": "monthly",
+    })
+    assert r.status_code == 200
+    saved = client.get(f"/api/scenarios/{sid}").json()
+    assert saved["one_time"]["count"] == 0
+    assert saved["adjustments"][0]["date"] is None  # nothing left over from the old shape
+
+
+def test_an_edit_that_breaks_the_rules_is_refused_and_leaves_the_line_alone(client):
+    sid = client.post("/api/scenarios", json={"name": "Move"}).json()["id"]
+    adj = client.post(f"/api/scenarios/{sid}/adjustments", json=_one_time_body("Truck", 240_000, "2026-12-15")).json()
+    bad = client.patch(f"/api/adjustments/{adj['id']}", json={"kind": "add", "add_kind": "one_time", "name": "Truck",
+                                                              "amount_cents": 240_000, "direction": "out"})  # no date
+    assert bad.status_code == 422
+    assert client.get(f"/api/scenarios/{sid}").json()["one_time"]["cost_cents"] == 240_000

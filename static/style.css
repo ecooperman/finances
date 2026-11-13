@@ -442,6 +442,44 @@
   margin-bottom: 12px;
 }
 
+.fin-adj-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.fin-adj-head h3 {
+  margin: 0;
+}
+
+.fin-adj-order {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fin-adj-order select {
+  width: auto;
+  min-width: 150px;
+  font-size: 13px;
+  padding: 5px 30px 5px 8px;
+}
+
+.fin-adj-actions {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+
+.fin-adj-actions .secondary-btn,
+.fin-adj-actions .danger-btn {
+  padding: 5px 10px;
+}
+
 /* A scenario's one-time total: the figure to look at when planning something like a move. */
 .fin-adj-total {
   border: 1px solid var(--border);

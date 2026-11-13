@@ -173,7 +173,7 @@ function adjustmentFormHTML() {
     </div>`;
 }
 
-function wireAdjustmentForm(form, scenarioId) {
+function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
   const kind = form.querySelector('[name="kind"]');
   const addKind = form.querySelector('[name="add_kind"]');
   const freq = form.querySelector('[name="frequency"]');
@@ -223,6 +223,47 @@ function wireAdjustmentForm(form, scenarioId) {
   modifyMode.addEventListener("change", sync);
   sync();
 
+  // Editing: start from the line as it is now. The same form builds either an
+  // add (POST) or, with `existing`, a full replace of that line (PATCH).
+  if (existing) {
+    const field = (n) => form.querySelector(`[name="${n}"]`);
+    const set = (n, v) => {
+      if (v !== null && v !== undefined) field(n).value = String(v);
+    };
+    set("kind", existing.kind);
+    if (existing.kind === "add") {
+      set("add_kind", existing.add_kind || "recurring");
+      set("name", existing.name);
+      set("amount", existing.amount_cents != null ? centsToInputValue(existing.amount_cents) : "");
+      set("direction", existing.direction || "out");
+      set("date", existing.date);
+      set("frequency", existing.frequency);
+      set("anchor_month", existing.anchor_month);
+      set("category_id", existing.category_id ?? "");
+      set("person_id", existing.person_id ?? "");
+    } else {
+      const target =
+        existing.target_fund_id != null ? `f:${existing.target_fund_id}`
+        : existing.target_transaction_id != null ? `t:${existing.target_transaction_id}`
+        : `r:${existing.target_recurring_id}`;
+      const select = field("target");
+      // A one-off older than the list offers (or a deleted target) is still this line's target.
+      if (![...select.options].some((o) => o.value === target)) select.appendChild(new Option(describeAdjustment(existing), target));
+      select.value = target;
+      if (existing.kind === "modify") {
+        if (existing.override_amount_cents != null) {
+          set("modify_mode", "override");
+          set("modify_value", centsToInputValue(existing.override_amount_cents));
+        } else {
+          set("modify_mode", "multiplier");
+          set("modify_value", existing.multiplier);
+        }
+      }
+    }
+    sync();
+    form.querySelector(".save-btn").textContent = "Save change";
+  }
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const g = (n) => form.querySelector(`[name="${n}"]`);
@@ -270,12 +311,12 @@ function wireAdjustmentForm(form, scenarioId) {
       }
     }
     try {
-      await fetchJSON(`${API}/scenarios/${scenarioId}/adjustments`, {
-        method: "POST",
+      await fetchJSON(existing ? `${API}/adjustments/${existing.id}` : `${API}/scenarios/${scenarioId}/adjustments`, {
+        method: existing ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      Global.showMessage("Change added.", "success");
+      Global.showMessage(existing ? "Change saved." : "Change added.", "success");
       load();
     } catch (err) {
       Global.showMessage(err.message, "error");
@@ -283,8 +324,56 @@ function wireAdjustmentForm(form, scenarioId) {
   });
 
   form.querySelector('[data-act="cancel-adj"]').addEventListener("click", () => {
+    if (onDone) return onDone(); // editing: put the line back
     form.classList.add("hidden");
     form.previousElementSibling?.classList.remove("hidden"); // show the "+ add change" button again
+  });
+}
+
+// --- order of a scenario's lines ---------------------------------------
+
+// How the changes are listed. Remembered on this device; the default is by date.
+const ORDER_CHOICES = [
+  ["date", "Date"],
+  ["amount", "Amount (largest first)"],
+  ["name", "Name"],
+  ["added", "Order added"],
+];
+
+function savedOrder() {
+  try {
+    const v = localStorage.getItem("fin.scenarioOrder");
+    return ORDER_CHOICES.some(([k]) => k === v) ? v : "date";
+  } catch (err) {
+    return "date";
+  }
+}
+
+function saveOrder(v) {
+  try {
+    localStorage.setItem("fin.scenarioOrder", v);
+  } catch (err) {
+    // blocked storage just forgets the choice
+  }
+}
+
+// By date: lines with a date (one-time payments) first, soonest first; the
+// rest (recurring lines, funds, edits to real rows) follow in the order added.
+function orderAdjustments(list, mode) {
+  const money = (a) => a.amount_cents ?? a.override_amount_cents ?? 0;
+  const label = (a) => (a.name || describeAdjustment(a)).toLowerCase();
+  const byAdded = (a, b) => a.id - b.id;
+  const sorted = list.slice();
+  if (mode === "added") return sorted.sort(byAdded);
+  if (mode === "name") return sorted.sort((a, b) => label(a).localeCompare(label(b)) || byAdded(a, b));
+  if (mode === "amount") return sorted.sort((a, b) => money(b) - money(a) || byAdded(a, b));
+  return sorted.sort((a, b) => {
+    const da = a.add_kind === "one_time" ? a.date : null;
+    const db = b.add_kind === "one_time" ? b.date : null;
+    if (da && db) return da < db ? -1 : da > db ? 1 : byAdded(a, b);
+    if (da) return -1;
+    if (db) return 1;
+    return byAdded(a, b);
   });
 }
 
@@ -318,6 +407,7 @@ function oneTimeSummary(oneTime) {
 function card(scenario) {
   const el_ = Global.el;
   const wrap = el_("div", { class: "item-card" });
+  wrap.dataset.id = scenario.id;
   const n = scenario.adjustments.length;
   const oneTime = scenario.one_time;
 
@@ -376,29 +466,59 @@ function card(scenario) {
     }
   });
 
-  // adjustments list
+  // adjustments list: ordered as chosen (by date unless changed), each line
+  // with Edit (swaps the line for the form, filled in) and Remove.
   const adjList = el_("div", { class: "fin-adj-list" });
-  if (!n) adjList.appendChild(el_("p", { class: "empty-state", text: "No changes yet." }));
-  for (const a of scenario.adjustments) {
-    adjList.appendChild(
-      el_("div", { class: "fin-adj-row" }, [
+  function renderAdjList() {
+    adjList.replaceChildren();
+    if (!n) adjList.appendChild(el_("p", { class: "empty-state", text: "No changes yet." }));
+    for (const a of orderAdjustments(scenario.adjustments, savedOrder())) {
+      const row = el_("div", { class: "fin-adj-row" }, [
         el_("span", { class: "fin-adj-text", text: describeAdjustment(a) }),
-        el_("button", {
-          type: "button",
-          class: "danger-btn",
-          text: "Remove",
-          onclick: async () => {
-            try {
-              await fetchJSON(`${API}/adjustments/${a.id}`, { method: "DELETE" });
-              load();
-            } catch (err) {
-              Global.showMessage(err.message, "error");
-            }
-          },
-        }),
-      ])
-    );
+        el_("div", { class: "fin-adj-actions" }, [
+          el_("button", {
+            type: "button",
+            class: "secondary-btn",
+            text: "Edit",
+            onclick: () => {
+              const form = el_("form", { class: "add-card fin-adj-form" });
+              form.innerHTML = adjustmentFormHTML();
+              wireAdjustmentForm(form, scenario.id, a, () => form.replaceWith(row));
+              row.replaceWith(form);
+              form.querySelector("input, select")?.focus();
+            },
+          }),
+          el_("button", {
+            type: "button",
+            class: "danger-btn",
+            text: "Remove",
+            onclick: async () => {
+              try {
+                await fetchJSON(`${API}/adjustments/${a.id}`, { method: "DELETE" });
+                load();
+              } catch (err) {
+                Global.showMessage(err.message, "error");
+              }
+            },
+          }),
+        ]),
+      ]);
+      adjList.appendChild(row);
+    }
+    if (typeof applyIcons === "function") applyIcons(adjList);
   }
+  renderAdjList();
+
+  const orderSelect = el_("select", { "aria-label": "Order the changes by" }, ORDER_CHOICES.map(([value, text]) => el_("option", { value, text })));
+  orderSelect.value = savedOrder();
+  orderSelect.addEventListener("change", () => {
+    saveOrder(orderSelect.value);
+    renderAdjList();
+  });
+  const changesHead = el_("div", { class: "fin-adj-head" }, [
+    el_("h3", { text: "Changes" }),
+    n > 1 ? el_("label", { class: "fin-adj-order" }, [el_("span", { text: "Order by" }), orderSelect]) : null,
+  ]);
 
   const addChangeBtn = el_("button", { type: "button", class: "secondary-btn", text: "+ Add change" });
   const adjForm = el_("form", { class: "add-card hidden fin-adj-form" });
@@ -410,7 +530,7 @@ function card(scenario) {
   wireAdjustmentForm(adjForm, scenario.id);
 
   inner.appendChild(metaForm);
-  inner.appendChild(el_("h3", { text: "Changes" }));
+  inner.appendChild(changesHead);
   if (oneTime.count) inner.appendChild(oneTimeSummary(oneTime));
   inner.appendChild(adjList);
   inner.appendChild(addChangeBtn);
@@ -441,8 +561,14 @@ async function load() {
     RECURRING = recurring;
     FUNDS = funds;
     TRANSACTIONS = transactions.sort((a, b) => (a.date < b.date ? 1 : -1)); // newest first
+    // Saving, adding or removing a line reloads the list: keep the cards that were open open.
+    const wasOpen = new Set([...listEl.querySelectorAll(".item-card.expanded")].map((c) => c.dataset.id));
     listEl.innerHTML = "";
-    scenarios.forEach((s) => listEl.appendChild(card(s)));
+    scenarios.forEach((s) => {
+      const c = card(s);
+      listEl.appendChild(c);
+      if (wasOpen.has(String(s.id))) c.querySelector(".item-summary").click();
+    });
     emptyEl.classList.toggle("hidden", scenarios.length > 0);
     countEl.textContent = `${scenarios.length} scenario${scenarios.length === 1 ? "" : "s"}`;
   } catch (err) {
