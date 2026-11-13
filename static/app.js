@@ -703,7 +703,7 @@ function spendEntriesEditor(itemId, isoDate, entries, onChange) {
       el("span", { class: "fin-spend-note", text: e.note || "" }),
       el("button", {
         type: "button", class: "fin-spend-del", title: "Remove this cost", "aria-label": "Remove this cost",
-        text: "×", onclick: async () => { if (await removeSpend(e.id)) onChange(); },
+        "data-btn-icon": "x", text: "×", onclick: async () => { if (await removeSpend(e.id)) onChange(); },
       }),
     ])));
   const amount = el("input", { type: "text", inputmode: "decimal", placeholder: "$ spent", "aria-label": "Amount spent" });
@@ -712,7 +712,7 @@ function spendEntriesEditor(itemId, isoDate, entries, onChange) {
     if (await logSpend(itemId, isoDate, amount.value, note.value)) onChange();
   };
   const add = el("form", { class: "fin-spend-add" }, [
-    amount, note, el("button", { type: "submit", class: "fin-spend-btn", text: "Add" }),
+    amount, note, el("button", { type: "submit", class: "fin-spend-btn", "data-btn-icon": "plus", text: "Add" }),
   ]);
   add.addEventListener("submit", (ev) => { ev.preventDefault(); submit(); });
   return el("div", { class: "fin-spend-editor" }, [list, add]);
@@ -768,7 +768,7 @@ function deferralActions(r, dayNum) {
     body: JSON.stringify(body),
   });
   const button = (text, onClick, cls = "") => el("button", {
-    type: "button", class: "fin-day-action " + cls, text, onclick: onClick,
+    type: "button", class: "fin-day-action " + cls, "data-btn-icon": /^undo/i.test(text) ? "undo" : "arrow-right", text, onclick: onClick,
   });
   const next = monthLabel(shiftMonthStr(CAL_MONTH, 1));
 

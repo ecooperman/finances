@@ -1,11 +1,12 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-ui="v2">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Overview · Finances</title>
   <link rel="preconnect" href="{{ shared_assets_base }}" />
   <link rel="stylesheet" href="{{ shared_assets_base }}/theme.css" />
+  <script src="{{ shared_assets_base }}/theme-init.js"></script>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -39,12 +40,12 @@
     </section>
 
     <div class="fin-monthbar">
-      <button type="button" id="month-prev" class="fin-step" aria-label="Previous month">‹</button>
+      <button type="button" id="month-prev" class="fin-step" aria-label="Previous month" data-btn-icon="arrow-left">‹</button>
       <div class="fin-monthbar-label">
         <span id="month-label">—</span>
         <button type="button" id="month-today" class="fin-today-link">This month</button>
       </div>
-      <button type="button" id="month-next" class="fin-step" aria-label="Next month">›</button>
+      <button type="button" id="month-next" class="fin-step" aria-label="Next month" data-btn-icon="arrow-right">›</button>
     </div>
 
     <div class="fin-filters">
@@ -72,14 +73,14 @@
           <span class="fin-opening-label">Opening balance</span>
           <strong id="opening-amt"></strong>
           <span id="opening-src" class="fin-opening-src"></span>
-          <button type="button" id="opening-edit" class="fin-link-btn">Set actual</button>
+          <button type="button" id="opening-edit" class="fin-link-btn" data-btn-icon="edit">Set actual</button>
         </div>
         <form id="opening-form" class="fin-opening-form hidden">
           <input name="amount" type="text" inputmode="decimal" placeholder="actual balance, e.g. 1250.00" aria-label="Opening balance" />
           <input name="note" type="text" placeholder="note (optional)" aria-label="Note" />
-          <button type="submit" class="fin-spend-btn">Save</button>
-          <button type="button" id="opening-reset" class="fin-link-btn hidden">Back to rollover</button>
-          <button type="button" id="opening-cancel" class="fin-link-btn">Cancel</button>
+          <button type="submit" class="fin-spend-btn" data-btn-icon="check">Save</button>
+          <button type="button" id="opening-reset" class="fin-link-btn hidden" data-btn-icon="undo">Back to rollover</button>
+          <button type="button" id="opening-cancel" class="fin-link-btn" data-btn-icon="x">Cancel</button>
         </form>
         <div class="fin-opening-end">Ends the month at <strong id="closing-amt"></strong></div>
       </div>
@@ -114,7 +115,7 @@
 
   <div id="day-modal" class="modal-overlay hidden">
     <div class="modal fin-day-modal" role="dialog" aria-modal="true" aria-labelledby="day-modal-title">
-      <button type="button" class="modal-close" aria-label="Close" onclick="Global.closeModal('day-modal')">&times;</button>
+      <button type="button" class="modal-close" aria-label="Close" data-btn-icon="x" onclick="Global.closeModal('day-modal')">&times;</button>
       <h2 id="day-modal-title"></h2>
       <div id="day-modal-body"></div>
     </div>

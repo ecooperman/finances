@@ -10,6 +10,11 @@
   --out-bg: #fbeee2;
 }
 
+:root[data-theme="dark"] {
+  --out: #e0a060;
+  --out-bg: rgba(224, 160, 96, 0.14);
+}
+
 /* --- month stepper --- */
 
 .fin-monthbar {
@@ -17,7 +22,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 10px;
@@ -61,7 +66,7 @@
 }
 
 .fin-segmented button {
-  background: #fff;
+  background: var(--surface);
   color: var(--muted);
   border: none;
   border-radius: 0;
@@ -76,7 +81,7 @@
 
 .fin-segmented button.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-text);
 }
 
 /* The add form's One-time / Recurring / Fund switch fills the row. */
@@ -202,7 +207,7 @@
 
 .fin-filters .secondary-btn.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-text);
 }
 
 /* --- section + rows (Overview) --- */
@@ -216,7 +221,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
@@ -347,7 +352,7 @@
 }
 
 .fin-total-group {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 14px 16px;
@@ -466,7 +471,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
@@ -561,7 +566,7 @@
 }
 
 .fin-cal-cell {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   min-height: 78px;
@@ -675,7 +680,7 @@
 /* --- "until next paycheck" card (Overview, top) --- */
 
 .fin-paycheck {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-left: 4px solid var(--accent);
   border-radius: 10px;
@@ -782,7 +787,7 @@
 }
 
 .fin-tag-nodate {
-  background: #fff;
+  background: var(--surface);
   color: var(--warning);
   border: 1px solid var(--warning);
 }
@@ -1005,7 +1010,7 @@
 }
 
 .fin-today {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-left: 4px solid var(--warning, #a6690a);
   border-radius: 10px;
@@ -1126,7 +1131,7 @@
   border-radius: 6px;
   border: 1px solid var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-text);
   cursor: pointer;
 }
 

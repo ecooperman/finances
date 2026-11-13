@@ -141,8 +141,8 @@ function catRow(c, index, all) {
       Global.showMessage(err.message, "error");
     }
   };
-  const up = Global.el("button", { type: "button", class: "fin-move", text: "▲", title: "Move up", onclick: () => move(-1) });
-  const down = Global.el("button", { type: "button", class: "fin-move", text: "▼", title: "Move down", onclick: () => move(1) });
+  const up = Global.el("button", { type: "button", class: "fin-move", "data-btn-icon": "arrow-up", text: "▲", title: "Move up", "aria-label": "Move up", onclick: () => move(-1) });
+  const down = Global.el("button", { type: "button", class: "fin-move", "data-btn-icon": "arrow-down", text: "▼", title: "Move down", "aria-label": "Move down", onclick: () => move(1) });
 
   return Global.el("div", { class: "fin-settings-row fin-cat-row" }, [
     Global.el("span", { class: "fin-move-group" }, [up, down]),
