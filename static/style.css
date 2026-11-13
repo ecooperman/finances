@@ -538,8 +538,22 @@
   padding: 8px 10px;
 }
 
+.fin-adj-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .fin-adj-text {
   font-size: 13px;
+}
+
+.fin-adj-note {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .fin-adj-row .danger-btn {

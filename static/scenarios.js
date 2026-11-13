@@ -167,6 +167,11 @@ function adjustmentFormHTML() {
       </div>
     </div>
 
+    <div class="field">
+      <label>Notes</label>
+      <textarea name="notes" rows="2" placeholder="Optional - e.g. quote from the moving company, link, where it came from"></textarea>
+    </div>
+
     <div class="item-actions">
       <button type="submit" class="save-btn">Add change</button>
       <button type="button" class="cancel-btn" data-act="cancel-adj">Cancel</button>
@@ -231,6 +236,7 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
       if (v !== null && v !== undefined) field(n).value = String(v);
     };
     set("kind", existing.kind);
+    set("notes", existing.notes);
     if (existing.kind === "add") {
       set("add_kind", existing.add_kind || "recurring");
       set("name", existing.name);
@@ -268,6 +274,7 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
     e.preventDefault();
     const g = (n) => form.querySelector(`[name="${n}"]`);
     const k = g("kind").value;
+    const notes = g("notes").value.trim() || null;
     let body = { kind: k };
     if (k === "add") {
       const addKindValue = g("add_kind").value;
@@ -310,6 +317,7 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
         }
       }
     }
+    body.notes = notes;
     try {
       await fetchJSON(existing ? `${API}/adjustments/${existing.id}` : `${API}/scenarios/${scenarioId}/adjustments`, {
         method: existing ? "PATCH" : "POST",
@@ -474,7 +482,10 @@ function card(scenario) {
     if (!n) adjList.appendChild(el_("p", { class: "empty-state", text: "No changes yet." }));
     for (const a of orderAdjustments(scenario.adjustments, savedOrder())) {
       const row = el_("div", { class: "fin-adj-row" }, [
-        el_("span", { class: "fin-adj-text", text: describeAdjustment(a) }),
+        el_("div", { class: "fin-adj-body" }, [
+          el_("span", { class: "fin-adj-text", text: describeAdjustment(a) }),
+          a.notes ? el_("span", { class: "fin-adj-note", text: a.notes }) : null,
+        ]),
         el_("div", { class: "fin-adj-actions" }, [
           el_("button", {
             type: "button",

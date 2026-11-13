@@ -252,3 +252,19 @@ def test_an_edit_that_breaks_the_rules_is_refused_and_leaves_the_line_alone(clie
                                                               "amount_cents": 240_000, "direction": "out"})  # no date
     assert bad.status_code == 422
     assert client.get(f"/api/scenarios/{sid}").json()["one_time"]["cost_cents"] == 240_000
+
+
+# --- a note on a line ---------------------------------------------------------
+
+
+def test_a_line_keeps_its_note_and_an_edit_can_change_or_clear_it(client):
+    sid = client.post("/api/scenarios", json={"name": "Move"}).json()["id"]
+    body = {**_one_time_body("Truck", 240_000, "2026-12-15"), "notes": "Quote from U-Haul, valid to Dec 1"}
+    adj = client.post(f"/api/scenarios/{sid}/adjustments", json=body).json()
+    assert client.get(f"/api/scenarios/{sid}").json()["adjustments"][0]["notes"] == "Quote from U-Haul, valid to Dec 1"
+
+    body["notes"] = "Booked - confirmation 4471"
+    assert client.patch(f"/api/adjustments/{adj['id']}", json=body).json()["notes"] == "Booked - confirmation 4471"
+
+    body["notes"] = None
+    assert client.patch(f"/api/adjustments/{adj['id']}", json=body).json()["notes"] is None
