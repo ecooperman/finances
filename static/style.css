@@ -187,7 +187,8 @@
   gap: 4px;
 }
 
-.fin-filter > span {
+.fin-filter > span,
+.fin-filter > label {
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -199,6 +200,13 @@
 .fin-filter input[type="month"] {
   width: auto;
   min-width: 150px;
+}
+
+/* The month and its "All time" chip stay together, so the chip is never left alone on a line of its own. */
+.fin-filter-pair {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .fin-filters .secondary-btn {
@@ -432,6 +440,53 @@
   flex-direction: column;
   gap: 6px;
   margin-bottom: 12px;
+}
+
+/* A scenario's one-time total: the figure to look at when planning something like a move. */
+.fin-adj-total {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--muted-bg);
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+
+.fin-adj-total-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.fin-adj-total-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.fin-adj-total-amount {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.fin-adj-total-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.fin-adj-total-months {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dotted var(--border);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .fin-adj-row {

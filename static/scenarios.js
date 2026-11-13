@@ -288,16 +288,44 @@ function wireAdjustmentForm(form, scenarioId) {
   });
 }
 
+// --- one-time total --------------------------------------------------
+
+// What the scenario's one-time lines add up to, overall and month by month
+// (the server works it out: see schemas.OneTimeSummary).
+function oneTimeSummary(oneTime) {
+  const el_ = Global.el;
+  const parts = [`${oneTime.count} one-time line${oneTime.count === 1 ? "" : "s"}`];
+  if (oneTime.in_cents) parts.push(`${fmtMoney(oneTime.out_cents)} out, ${fmtMoney(oneTime.in_cents)} in`);
+  const box = el_("div", { class: "fin-adj-total" }, [
+    el_("div", { class: "fin-adj-total-head" }, [
+      el_("span", { class: "fin-adj-total-label", text: "Total cost" }),
+      el_("span", { class: "fin-adj-total-amount", text: fmtMoney(oneTime.cost_cents) }),
+    ]),
+    el_("div", { class: "fin-adj-total-sub", text: parts.join(" · ") }),
+  ]);
+  if (oneTime.by_month.length > 1) {
+    box.appendChild(
+      el_("div", { class: "fin-adj-total-months" }, oneTime.by_month.map((m) =>
+        el_("span", { class: "fin-adj-total-month", text: `${monthLabel(m.month)}: ${fmtMoney(m.out_cents - m.in_cents)}` })
+      ))
+    );
+  }
+  return box;
+}
+
 // --- scenario card ------------------------------------------------
 
 function card(scenario) {
   const el_ = Global.el;
   const wrap = el_("div", { class: "item-card" });
   const n = scenario.adjustments.length;
+  const oneTime = scenario.one_time;
 
   const summary = el_("button", { class: "item-summary", type: "button", "aria-expanded": "false" }, [
     el_("span", { class: "item-summary-title", text: scenario.name }),
     el_("span", { class: "item-badge item-badge-muted", text: `${n} change${n === 1 ? "" : "s"}` }),
+    // The one-time lines' total, visible without opening the card.
+    oneTime.count ? el_("span", { class: "item-badge item-badge-accent", title: "What the one-time lines add up to", text: `${fmtMoney(oneTime.cost_cents)} one-time` }) : null,
     el_("a", { class: "item-summary-icon-link", href: `/?scenario=${scenario.id}`, title: "Open in Overview", "data-icon": "calendar", "aria-hidden": "true" }),
     el_("span", { class: "item-chevron", "aria-hidden": "true", text: "▸" }),
   ]);
@@ -383,6 +411,7 @@ function card(scenario) {
 
   inner.appendChild(metaForm);
   inner.appendChild(el_("h3", { text: "Changes" }));
+  if (oneTime.count) inner.appendChild(oneTimeSummary(oneTime));
   inner.appendChild(adjList);
   inner.appendChild(addChangeBtn);
   inner.appendChild(adjForm);

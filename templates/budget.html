@@ -42,11 +42,13 @@
           <option value="inactive">Paused only</option>
         </select>
       </label>
-      <label class="fin-filter" id="month-filter">
-        <span>Month</span>
-        <input id="filter-month" type="month" />
-      </label>
-      <button type="button" id="filter-alltime" class="secondary-btn" data-btn-icon="none">All time</button>
+      <div class="fin-filter" id="month-filter">
+        <label for="filter-month">Month</label>
+        <div class="fin-filter-pair">
+          <input id="filter-month" type="month" />
+          <button type="button" id="filter-alltime" class="secondary-btn" data-btn-icon="none">All time</button>
+        </div>
+      </div>
     </div>
 
     <button id="show-add" type="button" class="add-toggle">+ Add</button>

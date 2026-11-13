@@ -1,10 +1,26 @@
-import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+"""DATABASE_URL points the whole suite at a throwaway SQLite file *before* the
+app is imported (app/database.py reads it when it loads), so no test can reach
+the real finances.db even by accident. The `db` fixture below still gives each
+test its own fresh in-memory database; see tests/test_database_url.py for the
+checks that this holds and that the real migrations build the same schema."""
+import os
+import tempfile
 
-from app.database import Base
-from app.services import trips as trips_service
+_db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+_db_file.close()
+os.environ["DATABASE_URL"] = f"sqlite:///{_db_file.name}"
+
+import pytest  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
+
+from app.database import Base  # noqa: E402
+from app.services import trips as trips_service  # noqa: E402
+
+
+def pytest_sessionfinish(session, exitstatus):
+    os.unlink(_db_file.name)
 
 
 @pytest.fixture()

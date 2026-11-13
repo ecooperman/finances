@@ -152,3 +152,63 @@ def test_api_add_and_describe_adjustments_and_cleanup_on_delete(db, client):
     crud.delete_transaction(db, couch.id)
     left = client.get(f"/api/scenarios/{sid}").json()["adjustments"]
     assert [x["kind"] for x in left] == ["add"]
+
+
+# --- the scenario's one-time total (the "what will this cost" figure) -------
+
+
+def _add_one_time(client, scenario_id, name, cents, day, direction="out"):
+    r = client.post(f"/api/scenarios/{scenario_id}/adjustments", json={
+        "kind": "add", "add_kind": "one_time", "name": name, "amount_cents": cents,
+        "direction": direction, "date": day,
+    })
+    assert r.status_code == 200, r.text
+
+
+def test_a_scenario_with_no_one_time_lines_totals_zero(client):
+    sid = client.post("/api/scenarios", json={"name": "Empty"}).json()["id"]
+    one_time = client.get(f"/api/scenarios/{sid}").json()["one_time"]
+    assert one_time == {"count": 0, "out_cents": 0, "in_cents": 0, "cost_cents": 0, "by_month": []}
+
+
+def test_one_time_lines_are_totalled_overall_and_by_month_in_date_order(client):
+    sid = client.post("/api/scenarios", json={"name": "Move"}).json()["id"]
+    _add_one_time(client, sid, "Deposit", 200_000, "2027-01-05")
+    _add_one_time(client, sid, "Truck", 240_000, "2026-12-15")
+    _add_one_time(client, sid, "Boxes", 8_000, "2026-12-01")
+    one_time = client.get(f"/api/scenarios/{sid}").json()["one_time"]
+    assert one_time["count"] == 3
+    assert (one_time["out_cents"], one_time["cost_cents"]) == (448_000, 448_000)
+    assert one_time["by_month"] == [
+        {"month": "2026-12", "out_cents": 248_000, "in_cents": 0},
+        {"month": "2027-01", "out_cents": 200_000, "in_cents": 0},
+    ]
+
+
+def test_money_in_reduces_the_cost(client):
+    sid = client.post("/api/scenarios", json={"name": "Move"}).json()["id"]
+    _add_one_time(client, sid, "Truck", 240_000, "2026-12-15")
+    _add_one_time(client, sid, "Sell the couch", 30_000, "2026-12-10", direction="in")
+    one_time = client.get(f"/api/scenarios/{sid}").json()["one_time"]
+    assert (one_time["out_cents"], one_time["in_cents"], one_time["cost_cents"]) == (240_000, 30_000, 210_000)
+
+
+def test_only_one_time_additions_count(client, db):
+    sid = client.post("/api/scenarios", json={"name": "Mixed"}).json()["id"]
+    _add_one_time(client, sid, "Truck", 240_000, "2026-12-15")
+    client.post(f"/api/scenarios/{sid}/adjustments", json={
+        "kind": "add", "add_kind": "recurring", "name": "New rent", "amount_cents": 250_000, "direction": "out",
+        "frequency": "monthly",
+    })
+    client.post(f"/api/scenarios/{sid}/adjustments", json={
+        "kind": "add", "add_kind": "fund", "name": "Move fund", "amount_cents": 120_000,
+    })
+    one_time = client.get(f"/api/scenarios/{sid}").json()["one_time"]
+    assert (one_time["count"], one_time["cost_cents"]) == (1, 240_000)
+
+
+def test_the_total_is_in_the_scenario_list_too(client):
+    sid = client.post("/api/scenarios", json={"name": "Move"}).json()["id"]
+    _add_one_time(client, sid, "Truck", 240_000, "2026-12-15")
+    listed = next(s for s in client.get("/api/scenarios").json() if s["id"] == sid)
+    assert listed["one_time"]["cost_cents"] == 240_000

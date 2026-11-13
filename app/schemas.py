@@ -13,7 +13,7 @@ returned untouched).
 from datetime import date as date_type, datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 Direction = Literal["in", "out"]
 Frequency = Literal["weekly", "biweekly", "monthly", "quarterly", "semiannual", "annual"]
@@ -559,10 +559,52 @@ class ScenarioUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class OneTimeMonth(BaseModel):
+    month: str  # "2026-12"
+    out_cents: int
+    in_cents: int
+
+
+class OneTimeSummary(BaseModel):
+    """What a scenario's one-time lines add up to - the "what will this cost"
+    figure for something like a move. Only hypothetical one-time payments the
+    scenario adds count; recurring changes, funds and edits to real rows don't."""
+
+    count: int
+    out_cents: int
+    in_cents: int
+    cost_cents: int  # out minus in: what it costs overall
+    by_month: List[OneTimeMonth]  # in date order, only months that have lines
+
+
 class Scenario(ScenarioBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     adjustments: List[ScenarioAdjustment] = []
+
+    @computed_field
+    @property
+    def one_time(self) -> OneTimeSummary:
+        months: dict = {}
+        out_total = in_total = count = 0
+        for a in self.adjustments:
+            if a.kind != "add" or a.add_kind != "one_time" or a.amount_cents is None or a.date is None:
+                continue
+            count += 1
+            row = months.setdefault(a.date.strftime("%Y-%m"), {"out": 0, "in": 0})
+            if a.direction == "in":
+                row["in"] += a.amount_cents
+                in_total += a.amount_cents
+            else:
+                row["out"] += a.amount_cents
+                out_total += a.amount_cents
+        return OneTimeSummary(
+            count=count,
+            out_cents=out_total,
+            in_cents=in_total,
+            cost_cents=out_total - in_total,
+            by_month=[OneTimeMonth(month=m, out_cents=v["out"], in_cents=v["in"]) for m, v in sorted(months.items())],
+        )
 
 
 # ---------------------------------------------------------------------------

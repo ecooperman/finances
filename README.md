@@ -26,7 +26,7 @@ follow-up - see [`SYNC.md`](SYNC.md).
 |---|---|
 | `/` (Overview) | Month stepper + person/category/scenario filters; a **payment calendar** (a one-month grid built from the same filtered data); money-in / money-out lists with a cash-flow net, a **Provisioned** figure (recurring smoothed + funds + trips), and a funds/trips status line. Read-only rollup + a unified "+ Add". |
 | `/budget.html` | The one place to add and manage every money event. Segmented view (All / Recurring / One-time) over person/category/status/month filters; always-visible **Funds** and **Trips** sections; accordion cards for edit. Footer shows the provisioning baseline. |
-| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments - adding a recurring line, a **one-time payment on a date** or a fund, and removing / scaling a recurring item, a fund **or a real one-off transaction**. "Open in Overview" applies one. |
+| `/scenarios.html` | Create scenarios and their add / remove / scale-or-override adjustments - adding a recurring line, a **one-time payment on a date** or a fund, and removing / scaling a recurring item, a fund **or a real one-off transaction**. "Open in Overview" applies one. A scenario's **one-time lines are totalled** (total cost, out vs in, and month by month) on the card and as a badge - the "what will this cost" figure for something like a move. |
 | `/settings.html` | Manage the People and Category reference lists. |
 
 **Adding an entry**: one "+ Add" form (Overview + Budget) with a
@@ -103,6 +103,14 @@ The aggregation, fund math, and trip forecasting are covered by
 cd finances && source venv/bin/activate && pytest
 ```
 
+`tests/conftest.py` points `DATABASE_URL` (which `app/database.py` and
+`migrations/env.py` read) at a throwaway SQLite file before the app loads, so
+the suite can never reach your real `finances.db`; `tests/test_database_url.py`
+checks that, and that the real migrations build the schema the models
+describe. The same variable lets you try the app on a copy of your data:
+`DATABASE_URL=sqlite:////tmp/copy.db alembic upgrade head`, then start uvicorn
+with it set.
+
 ## Depends on shared-assets
 
 The nav bar uses four icons (`repeat`, `wallet`, `sliders`, `settings`)
@@ -158,8 +166,8 @@ otherwise.
 ## Upgrading to Postgres later
 
 Everything goes through SQLAlchemy + Alembic, so moving off SQLite is mostly
-a matter of swapping `DATABASE_URL` in `app/database.py` (and
-`sqlalchemy.url` in `alembic.ini`) for a Postgres connection string,
+a matter of setting `DATABASE_URL` (read by `app/database.py` and
+`migrations/env.py`) to a Postgres connection string,
 installing a driver (`psycopg`), and running `alembic upgrade head` against
 the new database - no application code depends on SQLite specifics.
 
