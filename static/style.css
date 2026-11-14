@@ -1348,3 +1348,24 @@
   padding-top: 4px;
 }
 
+
+/* A small icon leading text in a calendar chip or the day gutter (see glyph() in app.js). */
+.fin-glyph {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 3px;
+}
+
+.fin-glyph svg {
+  width: 12px;
+  height: 12px;
+}
+
+.fin-daygroup-num .fin-glyph {
+  margin-right: 0;
+}
+
+.fin-daygroup-num .fin-glyph svg {
+  width: 15px;
+  height: 15px;
+}

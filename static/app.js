@@ -95,7 +95,7 @@ function row(r) {
 function dayGroupOf(r) {
   const [y, m] = state.month.split("-").map(Number);
   if (r.daily) {
-    return { key: "daily", order: 99, top: "Daily", bottom: "↻", title: "Spent every day" };
+    return { key: "daily", order: 99, top: "Daily", bottom: "", icon: "repeat", title: "Spent every day" };
   }
   if (r.day != null) {
     const dt = new Date(y, m - 1, r.day);
@@ -107,7 +107,7 @@ function dayGroupOf(r) {
   if (r.occurrence_days && r.occurrence_days.length && r.day_of_week != null) {
     return {
       key: "w" + r.day_of_week, order: 100 + r.day_of_week, top: CAL_WEEKDAYS[r.day_of_week],
-      bottom: "↻", title: `Repeats on ${WEEKDAY_NAMES[r.day_of_week]}s`,
+      bottom: "", icon: "repeat", title: `Repeats on ${WEEKDAY_NAMES[r.day_of_week]}s`,
     };
   }
   return { key: "none", order: 1000, top: "—", bottom: "", title: "No day set" };
@@ -129,7 +129,7 @@ function renderList(container, rows) {
     container.appendChild(el("div", { class: "fin-daygroup" }, [
       el("div", { class: "fin-daygroup-date", title: g.title }, [
         el("span", { class: "fin-daygroup-top", text: g.top }),
-        el("span", { class: "fin-daygroup-num", text: g.bottom }),
+        el("span", { class: "fin-daygroup-num", text: g.bottom }, g.icon ? [glyph(g.icon)] : []),
       ]),
       el("div", { class: "fin-daygroup-items" }, g.rows.map(row)),
     ]));
@@ -153,6 +153,12 @@ function dayNet(entries) {
     .reduce((s, r) => s + (r.direction === "in" ? r.amount_cents : -r.amount_cents), 0);
 }
 
+// A small line icon from icons.js leading a chip's text (never a text glyph). Needs applyIcons on
+// whatever it ends up inside.
+function glyph(name) {
+  return el("span", { class: "fin-glyph", "data-icon": name, "aria-hidden": "true" });
+}
+
 function calEntry(r) {
   const effect = r.effect && r.effect !== "normal" ? " fin-cal-e-" + r.effect : "";
   const carry = r.kind === "carryover";
@@ -161,8 +167,7 @@ function calEntry(r) {
     title: `${r.name} · ${fmtMoney(r.amount_cents)}`
       + (carry ? ` (carried over from ${monthLabel(r.carried_from)})` : "")
       + (r.effect === "deferred" ? ` (carried to ${monthLabel(r.deferred_to)})` : effect && !carry ? ` (${r.effect})` : ""),
-    text: (carry ? "↪ " : "") + r.name,
-  });
+  }, [carry ? glyph("arrow-right") : null, r.name]);
 }
 
 // One chip per day for all the daily-spread items together. Muted when a
@@ -178,8 +183,7 @@ function dailyChip(dailies, pastDay) {
       .map((r) => `${r.name} · ${fmtMoney(r.amount_cents)} `
         + (r.daily_day.entries.length ? "(logged)" : `(planned${assumed ? ", nothing logged" : ""})`))
       .join("\n"),
-    text: `${anyLogged ? "✎ " : ""}Daily ${fmtMoney(total)}`,
-  });
+  }, [anyLogged ? glyph("edit") : null, `Daily ${fmtMoney(total)}`]);
 }
 
 function renderCalendar(month, rows, opening) {
@@ -308,6 +312,7 @@ function renderCalendar(month, rows, opening) {
     grid.appendChild(cell);
   }
   cal.appendChild(grid);
+  if (typeof applyIcons === "function") applyIcons(cal);
 
   renderCarryNote(month, rows);
   renderOpening(opening, CAL_RUN.get(daysInMonth), month);
