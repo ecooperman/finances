@@ -24,6 +24,10 @@ from .funds import monthly_contribution_cents
 from . import balance as balance_svc
 from . import daily as daily_svc
 from .schedule import active_in_month, cadence_hits, daily_amounts, occurrence_days, shift_month
+from . import linked_lists as lists_service
+from . import trips as trips_service
+from .forecast import place
+from .linked_lists import list_forecasts
 from .trips import trip_forecasts
 from ..schemas import (
     Category,
@@ -203,6 +207,48 @@ def _trip_rows(db, month, filters) -> List[dict]:
     return rows
 
 
+def _list_rows(db, month, filters) -> List[dict]:
+    """Provisioning-only rows, the same as trips: each linked list's still-to-buy cost spread over the
+    months until its date (cost read live from lists). Household / no category."""
+    if not _passes_filters(None, None, *filters):
+        return []
+    rows = []
+    for t in list_forecasts(db, month)["upcoming"]:
+        if t["monthly_contribution_cents"] <= 0:
+            continue
+        rows.append(_row("list", t["list_id"], t["name"], t["monthly_contribution_cents"], "out"))
+    return rows
+
+
+def _planned_row(db, adj, year, mon, filters) -> Optional[dict]:
+    """A list or trip linked into a scenario: one lump sum (the list's still-to-buy, the trip's cost -
+    or the adjustment's override) spread over the months until `adj.date`, by the same rule the real
+    budget uses. Provisioning only, like trips. Skipped when the real budget already counts it (it
+    would count twice), and when it is not spreadable yet (no cost)."""
+    if not _passes_filters(None, None, *filters):
+        return None
+    as_of = f"{year:04d}-{mon:02d}"
+    if adj.link_kind == "list":
+        if any(r["list_id"] == adj.link_id for r in list_forecasts(db, as_of)["upcoming"]):
+            return None  # already in the budget
+        cost = next((c for c in (lists_service.fetch_list_costs() or []) if c["id"] == adj.link_id), None)
+        computed, live_name = (cost["to_buy_cents"], cost["name"]) if cost else (0, None)
+    else:
+        if any(r["trip_id"] == adj.link_id for r in trip_forecasts(db, as_of)["upcoming"]):
+            return None
+        trip = next((t for t in trips_service.fetch_trip_costs() if t["id"] == adj.link_id), None)
+        computed, live_name = (trip.get("total_cost_cents", 0), trip["location"]) if trip else (0, None)
+    amount = adj.override_amount_cents if adj.override_amount_cents is not None else computed
+    holder = {}
+    bucket = place(
+        holder, amount=amount, month=adj.date.strftime("%Y-%m") if adj.date else None,
+        excluded=False, as_of_month=as_of, month_key="due_month",
+    )
+    if bucket != "upcoming" or holder["monthly_contribution_cents"] <= 0:
+        return None
+    return _row(adj.link_kind, -adj.id, live_name or adj.name, holder["monthly_contribution_cents"], "out", effect="added")
+
+
 def _apply_scenario(db, base_rows, adjustments, year, mon, filters, *, normalized: bool) -> List[dict]:
     """Return a fresh row list with the scenario's adjustments applied.
 
@@ -276,6 +322,13 @@ def _apply_scenario(db, base_rows, adjustments, year, mon, filters, *, normalize
                     target["face_amount_cents"] = adj.override_amount_cents
                 else:
                     target["face_amount_cents"] = round(target["face_amount_cents"] * adj.multiplier)
+
+        elif adj.kind == "add" and getattr(adj, "add_kind", "recurring") == "planned":
+            # provisioning only (a spread set-aside), like the trips and linked lists it mirrors
+            if normalized:
+                row = _planned_row(db, adj, year, mon, filters)
+                if row is not None:
+                    rows.append(row)
 
         elif adj.kind == "add":
             if not _passes_filters(adj.person_id, adj.category_id, *filters):
@@ -423,6 +476,7 @@ def compute_month(
         _recurring_rows(db, month, mon, filters, normalized=True)
         + _fund_rows(db, filters)
         + _trip_rows(db, month, filters)
+        + _list_rows(db, month, filters)
     )
 
     side = _side(actual, normalized)

@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..config import TRIPS_API_BASE, TRIPS_SERVICE_TOKEN
-from .funds import current_month, months_elapsed
+from .forecast import place
+from .funds import current_month
 
 log = logging.getLogger(__name__)
 
@@ -83,38 +84,15 @@ def trip_forecasts(db: Session, as_of_month: Optional[str] = None) -> dict:
             "excluded": bool(s.excluded) if s is not None else False,
             "settled_at": s.settled_at.isoformat() if s is not None and s.settled_at else None,
         }
-        month = _trip_month(trip.get("start_date"))
-        if row["excluded"]:
-            row.update(trip_month=month, months_remaining=None, monthly_contribution_cents=0)
-            excluded.append(row)
-            continue
-        if month is None:
-            row.update(trip_month=None, months_remaining=None, monthly_contribution_cents=0)
-            no_date.append(row)
-            continue
-        if amount <= 0:
-            # keep it visible (so you can set an override) but contribute nothing
-            months_remaining = max(months_elapsed(as_of_month, month), 1)
-            row.update(
-                trip_month=month, months_remaining=months_remaining,
-                monthly_contribution_cents=0,
-            )
-            upcoming.append(row)
-            continue
-        # months from as_of through the trip's month, inclusive; an overdue
-        # or current-month trip is "all due now".
-        months_remaining = months_elapsed(as_of_month, month)
-        if months_remaining <= 1:
-            per_month = amount
-            months_remaining = max(months_remaining, 1)
-        else:
-            per_month = round(amount / months_remaining)
-        row.update(
-            trip_month=month,
-            months_remaining=months_remaining,
-            monthly_contribution_cents=per_month,
+        bucket = place(
+            row,
+            amount=amount,
+            month=_trip_month(trip.get("start_date")),
+            excluded=row["excluded"],
+            as_of_month=as_of_month,
+            month_key="trip_month",
         )
-        upcoming.append(row)
+        {"upcoming": upcoming, "no_date": no_date, "excluded": excluded}[bucket].append(row)
 
     upcoming.sort(key=lambda r: r["trip_month"])
     return {"upcoming": upcoming, "no_date": no_date, "excluded": excluded}

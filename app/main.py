@@ -13,6 +13,7 @@ from .routers import (
     daily,
     deferrals,
     funds,
+    linked_lists,
     monthly,
     paycheck,
     people,
@@ -97,6 +98,7 @@ app.include_router(recurring.router)
 app.include_router(transactions.router)
 app.include_router(funds.router)
 app.include_router(trips.router)
+app.include_router(linked_lists.router)
 app.include_router(scenarios.router)
 app.include_router(monthly.router)
 app.include_router(paycheck.router)

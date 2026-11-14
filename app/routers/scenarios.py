@@ -3,8 +3,13 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import crud, schemas
+from .. import crud, models, schemas
 from ..deps import get_db
+from ..services import linked_lists as lists_service
+from ..services import trips as trips_service
+from ..services.funds import current_month
+from ..services.linked_lists import list_forecasts
+from ..services.trips import trip_forecasts
 
 router = APIRouter(prefix="/api", tags=["scenarios"])
 
@@ -12,6 +17,30 @@ router = APIRouter(prefix="/api", tags=["scenarios"])
 @router.get("/scenarios", response_model=List[schemas.Scenario])
 def list_scenarios(db: Session = Depends(get_db)):
     return crud.get_scenarios(db)
+
+
+@router.get("/scenarios/plannable", response_model=List[schemas.PlannableItem])
+def plannable(db: Session = Depends(get_db)):
+    """The lists and trips that can be linked into a scenario: those the real budget is not already
+    counting (it would count twice) and that are not already paid. Declared before
+    /scenarios/{scenario_id} so "plannable" is not taken for an id."""
+    as_of = current_month()
+    counted_lists = {r["list_id"] for r in list_forecasts(db, as_of)["upcoming"]}
+    counted_trips = {r["trip_id"] for r in trip_forecasts(db, as_of)["upcoming"]}
+    settled_lists = {l.list_id for l in db.query(models.LinkedList).filter(models.LinkedList.settled_at.isnot(None))}
+    settled_trips = {s.trip_id for s in db.query(models.TripSettlement).filter(models.TripSettlement.settled_at.isnot(None))}
+    items = []
+    for c in lists_service.fetch_list_costs() or []:
+        if c["id"] not in counted_lists and c["id"] not in settled_lists:
+            items.append({"kind": "list", "id": c["id"], "name": c["name"], "amount_cents": c["to_buy_cents"], "due_date": None})
+    for t in trips_service.fetch_trip_costs():
+        if t["id"] not in counted_trips and t["id"] not in settled_trips:
+            start = t.get("start_date")
+            items.append({
+                "kind": "trip", "id": t["id"], "name": t["location"],
+                "amount_cents": t.get("total_cost_cents", 0), "due_date": start[:10] if start else None,
+            })
+    return items
 
 
 @router.get("/scenarios/{scenario_id}", response_model=schemas.Scenario)

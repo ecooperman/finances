@@ -252,6 +252,35 @@ class TripSettlement(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class LinkedList(Base):
+    """A list in the lists app that has been linked into the budget as one lump-sum planned cost -
+    finances' side of it, exactly like TripSettlement is for a trip. The list's cost (what is still to
+    buy) is read live from lists and never stored here; this row holds only the choices made here: the
+    date it is due (lists have no date of their own, so it is picked when linking), whether it is
+    excluded, an override amount, and whether it has been marked fully paid.
+
+    `list_id` is lists' `ItemList.id` - a bare int, not an FK (separate databases). `name` is only the
+    last name seen, so a list that has gone missing can still be shown.
+    """
+
+    __tablename__ = "linked_lists"
+
+    id = Column(Integer, primary_key=True)
+    list_id = Column(Integer, nullable=False, unique=True)
+    name = Column(String, nullable=False)
+    due_date = Column(Date, nullable=True)
+    excluded = Column(Boolean, nullable=False, default=False)
+    override_amount_cents = Column(Integer, nullable=True)
+    settled_at = Column(DateTime, nullable=True)
+    settled_transaction_id = Column(
+        Integer, ForeignKey("transactions.id", ondelete="SET NULL"), nullable=True
+    )
+    note = Column(String, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class PaymentDeferral(Base):
     """A payment that wasn't made in `month` and rolls into the next one.
 
@@ -379,10 +408,14 @@ class ScenarioAdjustment(Base):
     id = Column(Integer, primary_key=True)
     scenario_id = Column(Integer, ForeignKey("scenarios.id", ondelete="CASCADE"), nullable=False)
     kind = Column(String, nullable=False)  # "add" | "remove" | "modify"
-    # For kind="add": "recurring" (default), "fund" or "one_time".
+    # For kind="add": "recurring" (default), "fund", "one_time" or "planned" (a list or trip linked
+    # into this scenario only: link_kind "list"/"trip" + link_id, `date` = the date it is due, and
+    # override_amount_cents an optional lump-sum override - see services/monthly._planned_row).
     add_kind = Column(String, nullable=False, default="recurring", server_default="recurring")
 
     # --- "add" columns ---
+    link_kind = Column(String, nullable=True)  # "list" | "trip", for add_kind="planned"
+    link_id = Column(Integer, nullable=True)  # lists' list id / trip-planning's trip id (bare ints)
     name = Column(String, nullable=True)
     amount_cents = Column(Integer, nullable=True)
     direction = Column(String, nullable=True)

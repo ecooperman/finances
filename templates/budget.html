@@ -92,6 +92,25 @@
       <p id="trips-empty" class="empty-state hidden">No upcoming trips.</p>
     </section>
 
+    <section class="fin-section" id="sec-linked-lists">
+      <div class="list-header">
+        <h2>Linked lists</h2>
+        <span id="linked-count" class="list-count"></span>
+      </div>
+      <p class="fin-note">Lists from the Lists app that track costs, each counted as one lump sum &mdash; what is still to buy. Like a trip, the cost is spread across the months until the date you pick (forecast only), and "Mark fully paid" moves it into this month's actual spending.</p>
+      <div id="linked-list" class="item-list"></div>
+      <p id="linked-empty" class="empty-state hidden">No lists linked.</p>
+      <form id="link-list-form" class="fin-link-form hidden">
+        <label class="fin-link-field">List
+          <select id="link-list-select" aria-label="List to link"></select>
+        </label>
+        <label class="fin-link-field">Due
+          <input type="date" id="link-list-date" aria-label="Date the list is due" />
+        </label>
+        <button type="submit" class="save-btn" data-btn-icon="link">Link list</button>
+      </form>
+    </section>
+
     <div id="baseline" class="fin-totals"></div>
 
     <div id="app-version"></div>

@@ -24,3 +24,11 @@ TRIPS_API_BASE = os.environ.get("TRIPS_API_BASE", "http://127.0.0.1:8060")
 # once in /etc/personal-apps/shared.env (see DEPLOYMENT.md); unset, the header
 # is simply not sent and trip-planning refuses the call.
 TRIPS_SERVICE_TOKEN = os.environ.get("TRIPS_SERVICE_TOKEN")
+
+# The lists app's base URL, for linked lists (see app/services/linked_lists.py): a list that tracks
+# costs can be linked into the budget as one lump sum, read live. Like trip-planning, called directly
+# on 127.0.0.1 with a shared secret sent as X-Service-Token - the same value as lists'
+# LISTS_SERVICE_TOKEN, set once in /etc/personal-apps/shared.env (see DEPLOYMENT.md). Unset, the header
+# is not sent and lists refuses the call (linked lists then show as "not found in Lists").
+LISTS_API_BASE = os.environ.get("LISTS_API_BASE", "http://127.0.0.1:8030")
+LISTS_SERVICE_TOKEN = os.environ.get("LISTS_SERVICE_TOKEN")

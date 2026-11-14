@@ -434,6 +434,82 @@ def unsettle_trip(db: Session, trip_id: int):
 
 
 # ---------------------------------------------------------------------------
+# Linked lists (finances' per-list state; the cost is read live from lists)
+# ---------------------------------------------------------------------------
+
+
+def get_linked_list(db: Session, list_id: int):
+    return db.query(models.LinkedList).filter(models.LinkedList.list_id == list_id).first()
+
+
+def link_list(db: Session, list_id: int, name: str, due_date):
+    """Link a list into the budget (one link per list; linking again returns the existing one)."""
+    link = get_linked_list(db, list_id)
+    if link is None:
+        link = models.LinkedList(list_id=list_id, name=name, due_date=due_date)
+        db.add(link)
+        db.commit()
+        db.refresh(link)
+    return link
+
+
+def update_linked_list(db: Session, list_id: int, updates: schemas.LinkedListUpdate):
+    link = get_linked_list(db, list_id)
+    if link is None:
+        return None
+    for field, value in updates.model_dump(exclude_unset=True).items():
+        setattr(link, field, value)
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+def unlink_list(db: Session, list_id: int) -> bool:
+    """Take a list out of the budget. A settled link keeps its transaction (that spend is real);
+    only the link goes."""
+    link = get_linked_list(db, list_id)
+    if link is None:
+        return False
+    db.delete(link)
+    db.commit()
+    return True
+
+
+def settle_linked_list(db: Session, list_id: int, when, amount_cents: int, name: str):
+    """Mark a linked list fully paid: one cash-flow transaction for the amount, and the link stops
+    forecasting (same as settling a trip)."""
+    link = get_linked_list(db, list_id)
+    if link is None:
+        return None
+    if link.settled_at is not None:
+        return link
+    txn = models.Transaction(date=when, description=f"{name} (list)", amount_cents=amount_cents, direction="out")
+    db.add(txn)
+    db.flush()
+    link.settled_at = datetime.utcnow()
+    link.settled_transaction_id = txn.id
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+def unsettle_linked_list(db: Session, list_id: int):
+    link = get_linked_list(db, list_id)
+    if link is None or link.settled_at is None:
+        return link
+    if link.settled_transaction_id is not None:
+        txn = get_transaction(db, link.settled_transaction_id)
+        if txn is not None:
+            _clear_transaction_refs(db, txn.id)
+            db.delete(txn)
+    link.settled_at = None
+    link.settled_transaction_id = None
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+# ---------------------------------------------------------------------------
 # Scenarios + adjustments
 # ---------------------------------------------------------------------------
 

@@ -452,6 +452,9 @@ function renderStatus() {
   if (TRIPS_STATUS && TRIPS_STATUS.upcoming_count) {
     text += `  ·  Trips: ${TRIPS_STATUS.upcoming_count} upcoming, ${fmtMoney(TRIPS_STATUS.monthly_total_cents)}/mo`;
   }
+  if (LISTS_STATUS && LISTS_STATUS.upcoming_count) {
+    text += `  ·  Linked lists: ${LISTS_STATUS.upcoming_count}, ${fmtMoney(LISTS_STATUS.monthly_total_cents)}/mo`;
+  }
   slot.textContent = text;
 }
 
@@ -460,7 +463,7 @@ function renderTotals(data) {
   totalsEl.appendChild(totalsBlock("This month (cash flow)", data.totals));
   totalsEl.appendChild(
     el("p", { class: "fin-normalized" }, [
-      "Provisioned — recurring smoothed + funds + trips: ",
+      "Provisioned — recurring smoothed + funds + trips + linked lists: ",
       el("strong", { text: fmtSignedMoney(data.normalized.net_cents) }),
     ])
   );
@@ -498,6 +501,7 @@ function buildQuery() {
 
 let FUNDS_STATUS = null;
 let TRIPS_STATUS = null;
+let LISTS_STATUS = null;
 let STATUS_LOADING = false;
 
 // The page's data comes from four independent requests - the month, the
@@ -546,13 +550,15 @@ async function loadStatus() {
   const seq = ++statusSeq;
   STATUS_LOADING = true;
   renderStatus();
-  const [funds, trips] = await Promise.all([
+  const [funds, trips, lists] = await Promise.all([
     fetchJSON(`${API}/funds/summary?month=${state.month}`).catch(() => null),
     fetchJSON(`${API}/trips/summary?month=${state.month}`).catch(() => null),
+    fetchJSON(`${API}/linked-lists/summary?month=${state.month}`).catch(() => null),
   ]);
   if (seq !== statusSeq) return;
   FUNDS_STATUS = funds;
   TRIPS_STATUS = trips;
+  LISTS_STATUS = lists;
   STATUS_LOADING = false;
   renderStatus();
 }

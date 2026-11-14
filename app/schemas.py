@@ -21,7 +21,7 @@ AdjustmentKind = Literal["add", "remove", "modify"]
 # Only these need an anchor_month (they land in specific calendar months);
 # weekly/biweekly/monthly land every month.
 SUBMONTHLY_FREQUENCIES = {"quarterly", "semiannual", "annual"}
-AddKind = Literal["recurring", "fund", "one_time"]
+AddKind = Literal["recurring", "fund", "one_time", "planned"]
 FundEntryUnit = Literal["year", "month", "weeks", "months", "times_year"]
 
 
@@ -390,6 +390,55 @@ class SettleTripRequest(BaseModel):
     _check_amount = field_validator("amount_cents")(_positive_cents)
 
 
+class LinkedListRow(BaseModel):
+    """One linked list's forecast - the same shape as a trip's, with the date finances holds."""
+
+    list_id: int
+    name: str
+    due_date: Optional[date_type] = None  # picked when linking; None = no date yet
+    due_month: Optional[str] = None  # "YYYY-MM"
+    total_cents: int  # what's forecast (override if set, else still-to-buy)
+    computed_total_cents: int  # the list's still-to-buy total, read live
+    override_amount_cents: Optional[int] = None
+    monthly_contribution_cents: int  # total spread over months_remaining
+    months_remaining: Optional[int] = None
+    excluded: bool = False
+    settled_at: Optional[str] = None
+    missing: bool = False  # lists does not report it (deleted, not tracking costs, or unreachable)
+    note: Optional[str] = None
+    bought_cents: int = 0
+    excluded_count: int = 0
+    unpriced_count: int = 0
+
+
+class AvailableList(BaseModel):
+    list_id: int
+    name: str
+    to_buy_cents: int
+
+
+class LinkedListForecasts(BaseModel):
+    upcoming: List[LinkedListRow] = []
+    no_date: List[LinkedListRow] = []
+    excluded: List[LinkedListRow] = []
+    available: List[AvailableList] = []  # lists that track costs and are not linked yet
+    reachable: bool = True  # False when the lists app could not be reached
+
+
+class LinkedListCreate(BaseModel):
+    list_id: int
+    due_date: Optional[date_type] = None
+
+
+class LinkedListUpdate(BaseModel):
+    due_date: Optional[date_type] = None
+    excluded: Optional[bool] = None
+    override_amount_cents: Optional[int] = None
+    note: Optional[str] = None
+
+    _check_override = field_validator("override_amount_cents")(_positive_cents)
+
+
 class TripsSummary(BaseModel):
     upcoming_count: int
     monthly_total_cents: int
@@ -455,6 +504,11 @@ def _check_adjustment_shape(obj):
             missing = [f for f in ("name", "amount_cents", "direction", "date") if getattr(obj, f) is None]
             if missing:
                 raise ValueError(f"'add' one-time payment requires: {', '.join(missing)}")
+        elif obj.add_kind == "planned":
+            # a list or trip linked into this scenario as one lump sum due on `date`
+            missing = [f for f in ("name", "link_kind", "link_id", "date") if getattr(obj, f) is None]
+            if missing:
+                raise ValueError(f"'add' planned expense requires: {', '.join(missing)}")
         else:
             missing = [f for f in ("name", "amount_cents", "direction") if getattr(obj, f) is None]
             if missing:
@@ -487,6 +541,8 @@ class ScenarioAdjustmentCreate(BaseModel):
     # one-time payment on `date`; for a fund, amount_cents is the annual rate
     # and direction/frequency are unused.
     add_kind: AddKind = "recurring"
+    link_kind: Optional[Literal["list", "trip"]] = None  # for add_kind="planned"
+    link_id: Optional[int] = None
     name: Optional[str] = None
     amount_cents: Optional[int] = None
     direction: Optional[Direction] = None
@@ -524,6 +580,8 @@ class ScenarioAdjustment(BaseModel):
     scenario_id: int
     kind: str
     add_kind: str = "recurring"
+    link_kind: Optional[str] = None
+    link_id: Optional[int] = None
     name: Optional[str] = None
     amount_cents: Optional[int] = None
     direction: Optional[str] = None
@@ -557,6 +615,16 @@ class ScenarioCreate(ScenarioBase):
 class ScenarioUpdate(BaseModel):
     name: Optional[str] = None
     notes: Optional[str] = None
+
+
+class PlannableItem(BaseModel):
+    """A list or trip that could be linked into a scenario (see GET /api/scenarios/plannable)."""
+
+    kind: Literal["list", "trip"]
+    id: int
+    name: str
+    amount_cents: int  # its lump sum right now: a list's still-to-buy, a trip's total cost
+    due_date: Optional[date_type] = None  # a trip's start date; None for a list (pick one)
 
 
 class OneTimeMonth(BaseModel):
@@ -630,7 +698,7 @@ class DailyDay(BaseModel):
 
 
 class MonthRow(BaseModel):
-    kind: Literal["recurring", "transaction", "fund", "trip", "carryover"]
+    kind: Literal["recurring", "transaction", "fund", "trip", "list", "carryover"]
     id: int
     name: str
     amount_cents: int

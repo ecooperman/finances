@@ -166,6 +166,35 @@
   font-size: 13px;
 }
 
+.fin-link-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 12px;
+  margin-top: 12px;
+}
+
+.fin-link-form.hidden {
+  display: none;
+}
+
+.fin-link-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.fin-link-field select {
+  min-width: 240px;
+}
+
+.fin-trip-actions .fin-trip-date {
+  width: 170px;
+  flex: none;
+}
+
 .fin-trip-override {
   width: 150px;
   flex: none;

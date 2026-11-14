@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
 from app.database import Base  # noqa: E402
+from app.services import linked_lists as linked_lists_service  # noqa: E402
 from app.services import trips as trips_service  # noqa: E402
 
 
@@ -46,3 +47,11 @@ def _no_live_trip_fetch(monkeypatch):
     trips_service._cache["data"] = None
     trips_service._cache["at"] = 0.0
     monkeypatch.setattr(trips_service, "fetch_trip_costs", lambda: [])
+
+
+@pytest.fixture(autouse=True)
+def _no_live_list_fetch(monkeypatch):
+    """Same for the lists app: by default it is reachable and reports no lists. Use the `set_lists`
+    fixture (tests/test_linked_lists.py) to supply data, or None for "unreachable"."""
+    linked_lists_service.clear_cache()
+    monkeypatch.setattr(linked_lists_service, "fetch_list_costs", lambda: [])

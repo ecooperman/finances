@@ -15,6 +15,7 @@ let CATEGORIES = [];
 let RECURRING = [];
 let FUNDS = [];
 let TRANSACTIONS = []; // recent + upcoming one-offs, for the remove/modify picker
+let PLANNABLE = []; // lists and trips the real budget is not counting, for "List or trip"
 
 // MONTH_OPTIONS comes from common.js (loaded first).
 const recurringName = (id) => {
@@ -71,6 +72,10 @@ function describeAdjustment(a) {
     if (a.add_kind === "one_time") {
       return `Add one-time "${a.name}" — ${fmtMoney(a.amount_cents)} ${a.direction === "in" ? "in" : "out"} on ${a.date}`;
     }
+    if (a.add_kind === "planned") {
+      const cost = a.override_amount_cents != null ? `${fmtMoney(a.override_amount_cents)} (override)` : "its current total";
+      return `Plan ${a.link_kind} "${a.name}" — ${cost}, spread until ${monthLabel(String(a.date).slice(0, 7))}`;
+    }
     const bits = [freqLabel(a.frequency || "monthly").toLowerCase(), a.direction === "in" ? "in" : "out"];
     return `Add "${a.name}" — ${fmtMoney(a.amount_cents)} ${bits.join(" ")}`;
   }
@@ -100,11 +105,16 @@ function adjustmentFormHTML() {
       <div class="field-row">
         <div class="field">
           <label>Add a</label>
-          <select name="add_kind">${opt("recurring", "Recurring line")}${opt("one_time", "One-time payment")}${opt("fund", "Sinking fund")}</select>
+          <select name="add_kind">${opt("recurring", "Recurring line")}${opt("one_time", "One-time payment")}${opt("fund", "Sinking fund")}${opt("planned", "List or trip (lump sum)")}</select>
         </div>
-        <div class="field">
+        <div class="field fin-adj-name-field">
           <label>Name</label>
           <input name="name" type="text" placeholder="e.g. Car payment" />
+        </div>
+        <div class="field fin-adj-planned-only hidden">
+          <label>Which list or trip</label>
+          <select name="planned"></select>
+          <span class="field-hint">Only lists that track costs and trips the budget is not already counting. Spread over the months until its date, like in the Budget.</span>
         </div>
       </div>
       <div class="field-row">
@@ -119,7 +129,7 @@ function adjustmentFormHTML() {
       </div>
       <div class="field-row fin-adj-onetime-only hidden">
         <div class="field">
-          <label>Date</label>
+          <label data-label="add_date">Date</label>
           <input name="date" type="date" />
         </div>
       </div>
@@ -135,7 +145,7 @@ function adjustmentFormHTML() {
           <select name="anchor_month">${MONTH_OPTIONS.map((m) => opt(m.value, m.label)).join("")}</select>
         </div>
       </div>
-      <div class="field-row">
+      <div class="field-row fin-adj-cat-row">
         <div class="field">
           <label>Category</label>
           <select name="category_id"></select>
@@ -187,9 +197,25 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
   const recurringOnly = form.querySelectorAll(".fin-adj-recurring-only"); // hidden for a fund
   const freqOnly = form.querySelector(".fin-adj-freq-only"); // hidden for a fund / one-time
   const oneTimeOnly = form.querySelector(".fin-adj-onetime-only");
+  const plannedOnly = form.querySelector(".fin-adj-planned-only");
+  const nameField = form.querySelector(".fin-adj-name-field");
+  const catRow = form.querySelector(".fin-adj-cat-row");
+  const dateLabel = form.querySelector('[data-label="add_date"]');
+  const plannedSelect = form.querySelector('[name="planned"]');
   const modifyMode = form.querySelector('[name="modify_mode"]');
   const modifyLabel = form.querySelector('[data-label="modify_value"]');
   const groups = form.querySelectorAll(".fin-adj-group");
+
+  fillSelect(
+    plannedSelect,
+    PLANNABLE.map((p) => ({ value: `${p.kind}:${p.id}`, label: `${p.name} (${p.kind}, ${fmtMoney(p.amount_cents)})` })),
+    { blankLabel: "— pick one —" }
+  );
+  // a trip comes with its own date; a list needs one picked
+  plannedSelect.addEventListener("change", () => {
+    const p = PLANNABLE.find((x) => `${x.kind}:${x.id}` === plannedSelect.value);
+    if (p && p.due_date) form.querySelector('[name="date"]').value = p.due_date;
+  });
 
   fillSelect(form.querySelector('[name="category_id"]'), CATEGORIES.map((c) => ({ value: c.id, label: c.name })), { blankLabel: "— none —" });
   fillSelect(form.querySelector('[name="person_id"]'), PEOPLE.map((p) => ({ value: p.id, label: p.name })), { blankLabel: "Joint" });
@@ -215,11 +241,16 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
     });
     const isFund = addKind.value === "fund";
     const isOneTime = addKind.value === "one_time";
-    recurringOnly.forEach((n) => n.classList.toggle("hidden", isFund));
-    freqOnly.classList.toggle("hidden", isFund || isOneTime);
-    oneTimeOnly.classList.toggle("hidden", !isOneTime);
-    addAmountLabel.textContent = isFund ? "Amount ($) per year" : "Amount ($)";
-    anchorField.classList.toggle("hidden", isFund || isOneTime || !isSubMonthlyFreq(freq.value));
+    const isPlanned = addKind.value === "planned";
+    recurringOnly.forEach((n) => n.classList.toggle("hidden", isFund || isPlanned));
+    freqOnly.classList.toggle("hidden", isFund || isOneTime || isPlanned);
+    oneTimeOnly.classList.toggle("hidden", !(isOneTime || isPlanned));
+    plannedOnly.classList.toggle("hidden", !isPlanned);
+    nameField.classList.toggle("hidden", isPlanned);
+    catRow.classList.toggle("hidden", isPlanned);
+    dateLabel.textContent = isPlanned ? "Due date" : "Date";
+    addAmountLabel.textContent = isFund ? "Amount ($) per year" : isPlanned ? "Override amount ($) - optional" : "Amount ($)";
+    anchorField.classList.toggle("hidden", isFund || isOneTime || isPlanned || !isSubMonthlyFreq(freq.value));
     modifyLabel.textContent = modifyMode.value === "multiplier" ? "Factor (e.g. 0.5)" : "Amount ($)";
   };
   kind.addEventListener("change", sync);
@@ -247,6 +278,13 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
       set("anchor_month", existing.anchor_month);
       set("category_id", existing.category_id ?? "");
       set("person_id", existing.person_id ?? "");
+      if (existing.add_kind === "planned") {
+        const value = `${existing.link_kind}:${existing.link_id}`;
+        // A list or trip the budget has started counting since (or one that is gone) is still this line's.
+        if (![...plannedSelect.options].some((o) => o.value === value)) plannedSelect.appendChild(new Option(existing.name, value));
+        plannedSelect.value = value;
+        set("amount", existing.override_amount_cents != null ? centsToInputValue(existing.override_amount_cents) : "");
+      }
     } else {
       const target =
         existing.target_fund_id != null ? `f:${existing.target_fund_id}`
@@ -280,6 +318,21 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
       const addKindValue = g("add_kind").value;
       const isFund = addKindValue === "fund";
       const isOneTime = addKindValue === "one_time";
+      if (addKindValue === "planned") {
+        const picked = PLANNABLE.find((x) => `${x.kind}:${x.id}` === plannedSelect.value);
+        const [linkKind, linkId] = plannedSelect.value.split(":");
+        if (!linkId) return Global.showMessage("Pick a list or trip.", "error");
+        const date = g("date").value;
+        if (!date) return Global.showMessage("Pick the date it is due.", "error");
+        const override = g("amount").value.trim() ? dollarsToCents(g("amount").value) : null;
+        if (override !== null && (override == null || override <= 0)) return Global.showMessage("The override must be a positive amount.", "error");
+        const old = existing && existing.link_kind === linkKind && String(existing.link_id) === linkId ? existing.name : null;
+        body = {
+          kind: "add", add_kind: "planned", link_kind: linkKind, link_id: Number(linkId),
+          name: picked ? picked.name : old || `${linkKind} #${linkId}`, date, override_amount_cents: override, notes,
+        };
+        return submitAdjustment(body);
+      }
       body = {
         kind: "add",
         add_kind: addKindValue,
@@ -318,6 +371,10 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
       }
     }
     body.notes = notes;
+    return submitAdjustment(body);
+  });
+
+  async function submitAdjustment(body) {
     try {
       await fetchJSON(existing ? `${API}/adjustments/${existing.id}` : `${API}/scenarios/${scenarioId}/adjustments`, {
         method: existing ? "PATCH" : "POST",
@@ -329,7 +386,7 @@ function wireAdjustmentForm(form, scenarioId, existing = null, onDone = null) {
     } catch (err) {
       Global.showMessage(err.message, "error");
     }
-  });
+  }
 
   form.querySelector('[data-act="cancel-adj"]').addEventListener("click", () => {
     if (onDone) return onDone(); // editing: put the line back
@@ -376,8 +433,8 @@ function orderAdjustments(list, mode) {
   if (mode === "name") return sorted.sort((a, b) => label(a).localeCompare(label(b)) || byAdded(a, b));
   if (mode === "amount") return sorted.sort((a, b) => money(b) - money(a) || byAdded(a, b));
   return sorted.sort((a, b) => {
-    const da = a.add_kind === "one_time" ? a.date : null;
-    const db = b.add_kind === "one_time" ? b.date : null;
+    const da = a.add_kind === "one_time" || a.add_kind === "planned" ? a.date : null;
+    const db = b.add_kind === "one_time" || b.add_kind === "planned" ? b.date : null;
     if (da && db) return da < db ? -1 : da > db ? 1 : byAdded(a, b);
     if (da) return -1;
     if (db) return 1;
@@ -563,12 +620,14 @@ async function load() {
     const since = new Date();
     since.setDate(since.getDate() - 180);
     const sinceISO = `${since.getFullYear()}-${String(since.getMonth() + 1).padStart(2, "0")}-${String(since.getDate()).padStart(2, "0")}`;
-    const [scenarios, recurring, funds, transactions] = await Promise.all([
+    const [scenarios, recurring, funds, transactions, plannable] = await Promise.all([
       fetchJSON(`${API}/scenarios`),
       fetchJSON(`${API}/recurring`),
       fetchJSON(`${API}/funds`),
       fetchJSON(`${API}/transactions?date_from=${sinceISO}`),
+      fetchJSON(`${API}/scenarios/plannable`).catch(() => []),
     ]);
+    PLANNABLE = plannable;
     RECURRING = recurring;
     FUNDS = funds;
     TRANSACTIONS = transactions.sort((a, b) => (a.date < b.date ? 1 : -1)); // newest first

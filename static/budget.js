@@ -555,12 +555,13 @@ function fundCard(fund) {
 
 async function renderBaseline() {
   try {
-    const [rec, funds, trips] = await Promise.all([
+    const [rec, funds, trips, lists] = await Promise.all([
       fetchJSON(`${API}/recurring/summary`),
       fetchJSON(`${API}/funds/summary`),
       fetchJSON(`${API}/trips/summary?month=${state.month}`).catch(() => ({ monthly_total_cents: 0 })),
+      fetchJSON(`${API}/linked-lists/summary?month=${state.month}`).catch(() => ({ monthly_total_cents: 0 })),
     ]);
-    const outTotal = rec.out_cents + funds.monthly_total_cents + trips.monthly_total_cents;
+    const outTotal = rec.out_cents + funds.monthly_total_cents + trips.monthly_total_cents + lists.monthly_total_cents;
     const net = rec.in_cents - outTotal;
     baselineEl.innerHTML = "";
     baselineEl.appendChild(
@@ -570,6 +571,9 @@ async function renderBaseline() {
         el("div", { class: "fin-total-row" }, [el("span", { text: "Recurring out (smoothed)" }), el("span", { class: "fin-amount-out", text: fmtMoney(rec.out_cents) })]),
         el("div", { class: "fin-total-row" }, [el("span", { text: "Funds set aside" }), el("span", { class: "fin-amount-out", text: fmtMoney(funds.monthly_total_cents) })]),
         el("div", { class: "fin-total-row" }, [el("span", { text: "Trips (spread)" }), el("span", { class: "fin-amount-out", text: fmtMoney(trips.monthly_total_cents) })]),
+        lists.monthly_total_cents
+          ? el("div", { class: "fin-total-row" }, [el("span", { text: "Linked lists (spread)" }), el("span", { class: "fin-amount-out", text: fmtMoney(lists.monthly_total_cents) })])
+          : null,
         el("div", { class: "fin-total-row fin-total-net" }, [
           el("span", { text: "Net / month" }),
           el("span", { class: "fin-net " + (net < 0 ? "fin-net-neg" : "fin-net-pos"), text: fmtSignedMoney(net) }),
@@ -637,29 +641,72 @@ async function loadFunds() {
   fundsCount.textContent = `${funds.length} fund${funds.length === 1 ? "" : "s"}`;
 }
 
-// --- trip forecast cards ------------------------------------
+// --- planned-cost cards: trips and linked lists -------------------------
+// A trip and a linked list are the same thing to finances - one lump sum, spread over the months
+// until its date - so they share one card. `cfg` says what differs: which API, which id, where the
+// month lives, and the wording.
 
-function tripCard(t, { excluded = false, noDate = false } = {}) {
+const TRIP_CARD = {
+  path: "trips",
+  idOf: (t) => t.trip_id,
+  monthOf: (t) => t.trip_month,
+  noun: "trip",
+  noDate: "Set a start date in trip-planning to fold this into the monthly forecast.",
+  noCost: "No cost yet — add activity/stay costs in trip-planning, or set an override below.",
+};
+
+const LIST_CARD = {
+  path: "linked-lists",
+  idOf: (t) => t.list_id,
+  monthOf: (t) => t.due_month,
+  noun: "list",
+  noDate: "Pick a due date below to fold this into the monthly forecast.",
+  noCost: "Nothing left to buy — price the list's items in Lists, or set an override below.",
+};
+
+function plannedCard(t, cfg, { excluded = false, noDate = false } = {}) {
+  const id = cfg.idOf(t);
   const wrap = el("div", { class: "item-card fin-trip-card" + (excluded ? " archived" : "") });
 
   const line1 = el("div", { class: "fin-trip-line" }, [
     el("span", { class: "fin-item-name", text: t.name }),
     noDate
       ? el("span", { class: "fin-tag fin-tag-removed", text: "no date" })
-      : el("span", { class: "fin-cadence", text: monthLabel(t.trip_month) }),
+      : el("span", { class: "fin-cadence", text: monthLabel(cfg.monthOf(t)) }),
     excluded ? el("span", { class: "fin-tag fin-tag-removed", text: "excluded" }) : null,
+    t.missing ? el("span", { class: "fin-tag fin-tag-removed", text: "not found in Lists" }) : null,
   ]);
 
   let detail;
-  if (noDate) {
-    detail = "Set a start date in trip-planning to fold this into the monthly forecast.";
+  if (t.missing) {
+    detail = "Lists doesn't report this list (deleted, no longer tracking costs, or unreachable). It counts only if you set an override.";
+  } else if (noDate) {
+    detail = cfg.noDate;
   } else if (t.total_cents <= 0) {
-    detail = "No cost yet — add activity/stay costs in trip-planning, or set an override below.";
+    detail = cfg.noCost;
   } else {
     detail = `Total ${fmtMoney(t.total_cents)} · ${fmtMoney(t.monthly_contribution_cents)}/mo`
       + (t.months_remaining ? ` for ${t.months_remaining} month${t.months_remaining === 1 ? "" : "s"}` : "");
   }
+  if (cfg.noun === "list" && !t.missing && t.override_amount_cents == null) {
+    const bits = [];
+    if (t.bought_cents) bits.push(`${fmtMoney(t.bought_cents)} already bought, not counted`);
+    if (t.unpriced_count) bits.push(`${t.unpriced_count} item${t.unpriced_count === 1 ? "" : "s"} with no price yet`);
+    if (bits.length) detail += ` — ${bits.join("; ")}`;
+  }
   const line2 = el("div", { class: "fin-trip-detail", text: detail });
+
+  const patch = async (body, done) => {
+    try {
+      await fetchJSON(`${API}/${cfg.path}/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      if (done) Global.showMessage(done, "success");
+      load();
+    } catch (err) {
+      Global.showMessage(err.message, "error");
+    }
+  };
 
   // override input
   const overrideInput = el("input", {
@@ -669,38 +716,31 @@ function tripCard(t, { excluded = false, noDate = false } = {}) {
   });
   const saveOverride = el("button", {
     type: "button", class: "secondary-btn", text: "Set",
-    onclick: async () => {
+    onclick: () => {
       const cents = dollarsToCents(overrideInput.value);
-      try {
-        await fetchJSON(`${API}/trips/${t.trip_id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ override_amount_cents: cents && cents > 0 ? cents : null }),
-        });
-        Global.showMessage("Trip override updated.", "success");
-        load();
-      } catch (err) {
-        Global.showMessage(err.message, "error");
-      }
+      patch({ override_amount_cents: cents && cents > 0 ? cents : null }, `${cap(cfg.noun)} override updated.`);
     },
   });
 
+  // a linked list's date is picked here (lists have none of their own)
+  const dueInput = cfg.noun === "list"
+    ? el("input", { type: "date", class: "fin-trip-date", "aria-label": "Due date", value: t.due_date || "" })
+    : null;
+  const saveDue = dueInput
+    ? el("button", {
+        type: "button", class: "secondary-btn", text: "Set date",
+        onclick: () => patch({ due_date: dueInput.value || null }, "Due date updated."),
+      })
+    : null;
+
   const actions = el("div", { class: "fin-trip-actions" }, [
+    dueInput,
+    saveDue,
     overrideInput,
     saveOverride,
     el("button", {
       type: "button", class: "secondary-btn", text: excluded ? "Include" : "Exclude",
-      onclick: async () => {
-        try {
-          await fetchJSON(`${API}/trips/${t.trip_id}`, {
-            method: "PATCH", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ excluded: !excluded }),
-          });
-          load();
-        } catch (err) {
-          Global.showMessage(err.message, "error");
-        }
-      },
+      onclick: () => patch({ excluded: !excluded }),
     }),
     !excluded && !noDate
       ? el("button", {
@@ -711,11 +751,26 @@ function tripCard(t, { excluded = false, noDate = false } = {}) {
             if (amt <= 0) return Global.showMessage("Set a cost or override first.", "error");
             if (!confirm(`Record ${fmtMoney(amt)} spent on "${t.name}" as a one-time transaction dated ${today}, and drop it from the forecast?`)) return;
             try {
-              await fetchJSON(`${API}/trips/${t.trip_id}/settle`, {
+              await fetchJSON(`${API}/${cfg.path}/${id}/settle`, {
                 method: "POST", headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ date: today }),
               });
               Global.showMessage(`"${t.name}" marked paid.`, "success");
+              load();
+            } catch (err) {
+              Global.showMessage(err.message, "error");
+            }
+          },
+        })
+      : null,
+    cfg.noun === "list"
+      ? el("button", {
+          type: "button", class: "danger-btn", text: "Unlink",
+          onclick: async () => {
+            if (!confirm(`Take "${t.name}" out of the budget? The list itself is not touched.`)) return;
+            try {
+              await fetchJSON(`${API}/${cfg.path}/${id}`, { method: "DELETE" });
+              Global.showMessage(`"${t.name}" unlinked.`, "success");
               load();
             } catch (err) {
               Global.showMessage(err.message, "error");
@@ -729,6 +784,8 @@ function tripCard(t, { excluded = false, noDate = false } = {}) {
   return wrap;
 }
 
+const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
+
 async function loadTrips() {
   let data;
   try {
@@ -741,9 +798,9 @@ async function loadTrips() {
     return;
   }
   const rows = [
-    ...data.upcoming.map((t) => tripCard(t)),
-    ...data.no_date.map((t) => tripCard(t, { noDate: true })),
-    ...data.excluded.map((t) => tripCard(t, { excluded: true })),
+    ...data.upcoming.map((t) => plannedCard(t, TRIP_CARD)),
+    ...data.no_date.map((t) => plannedCard(t, TRIP_CARD, { noDate: true })),
+    ...data.excluded.map((t) => plannedCard(t, TRIP_CARD, { excluded: true })),
   ];
   tripsList.innerHTML = "";
   rows.forEach((r) => tripsList.appendChild(r));
@@ -752,6 +809,63 @@ async function loadTrips() {
   tripsEmpty.classList.toggle("hidden", total > 0);
   tripsCount.textContent = total ? `${data.upcoming.length} upcoming` : "";
 }
+
+// --- linked lists ---------------------------------------------
+
+const linkedList = document.getElementById("linked-list");
+const linkedEmpty = document.getElementById("linked-empty");
+const linkedCount = document.getElementById("linked-count");
+const linkForm = document.getElementById("link-list-form");
+const linkSelect = document.getElementById("link-list-select");
+const linkDate = document.getElementById("link-list-date");
+
+async function loadLinkedLists() {
+  let data;
+  try {
+    data = await fetchJSON(`${API}/linked-lists?month=${state.month}`);
+  } catch (err) {
+    linkedList.innerHTML = "";
+    linkedEmpty.textContent = "Linked lists unavailable.";
+    linkedEmpty.classList.remove("hidden");
+    return;
+  }
+  const rows = [
+    ...data.upcoming.map((t) => plannedCard(t, LIST_CARD)),
+    ...data.no_date.map((t) => plannedCard(t, LIST_CARD, { noDate: true })),
+    ...data.excluded.map((t) => plannedCard(t, LIST_CARD, { excluded: true })),
+  ];
+  linkedList.innerHTML = "";
+  rows.forEach((r) => linkedList.appendChild(r));
+  const total = rows.length;
+  linkedEmpty.textContent = data.reachable
+    ? (data.available.length ? "No lists linked yet." : "No lists linked. Turn on Track costs on a list in Lists to link it here.")
+    : "Couldn't reach the Lists app, so there are no lists to link right now.";
+  linkedEmpty.classList.toggle("hidden", total > 0);
+  linkedCount.textContent = total ? `${data.upcoming.length} upcoming` : "";
+
+  // the picker offers the lists that track costs and are not linked yet
+  linkSelect.innerHTML = "";
+  data.available.forEach((a) =>
+    linkSelect.appendChild(el("option", { value: String(a.list_id), text: `${a.name} (${fmtMoney(a.to_buy_cents)} to buy)` }))
+  );
+  linkForm.classList.toggle("hidden", data.available.length === 0);
+}
+
+linkForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (!linkSelect.value) return;
+  try {
+    await fetchJSON(`${API}/linked-lists`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ list_id: Number(linkSelect.value), due_date: linkDate.value || null }),
+    });
+    linkDate.value = "";
+    Global.showMessage("List linked.", "success");
+    load();
+  } catch (err) {
+    Global.showMessage(err.message, "error");
+  }
+});
 
 async function load() {
   const showRec = state.view === "all" || state.view === "recurring";
@@ -763,7 +877,7 @@ async function load() {
   allTimeBtn.classList.toggle("hidden", !showOne);
 
   try {
-    const jobs = [renderBaseline(), loadFunds(), loadTrips()];
+    const jobs = [renderBaseline(), loadFunds(), loadTrips(), loadLinkedLists()];
     if (showRec) jobs.push(loadRecurring());
     if (showOne) jobs.push(loadOnetime());
     await Promise.all(jobs);
