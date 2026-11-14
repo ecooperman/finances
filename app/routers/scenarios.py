@@ -9,14 +9,22 @@ from ..services import linked_lists as lists_service
 from ..services import trips as trips_service
 from ..services.funds import current_month
 from ..services.linked_lists import list_forecasts
+from ..services.planned import planned_summary
 from ..services.trips import trip_forecasts
 
 router = APIRouter(prefix="/api", tags=["scenarios"])
 
 
+def _with_planned(db: Session, scenario):
+    """Attach the live planned-lists-and-trips summary the response carries (None passes through)."""
+    if scenario is not None:
+        scenario.planned = planned_summary(db, scenario.adjustments)
+    return scenario
+
+
 @router.get("/scenarios", response_model=List[schemas.Scenario])
 def list_scenarios(db: Session = Depends(get_db)):
-    return crud.get_scenarios(db)
+    return [_with_planned(db, s) for s in crud.get_scenarios(db)]
 
 
 @router.get("/scenarios/plannable", response_model=List[schemas.PlannableItem])
@@ -48,12 +56,12 @@ def get_scenario(scenario_id: int, db: Session = Depends(get_db)):
     scenario = crud.get_scenario(db, scenario_id)
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    return scenario
+    return _with_planned(db, scenario)
 
 
 @router.post("/scenarios", response_model=schemas.Scenario)
 def create_scenario(scenario: schemas.ScenarioCreate, db: Session = Depends(get_db)):
-    return crud.create_scenario(db, scenario)
+    return _with_planned(db, crud.create_scenario(db, scenario))
 
 
 @router.patch("/scenarios/{scenario_id}", response_model=schemas.Scenario)
@@ -63,7 +71,7 @@ def update_scenario(
     scenario = crud.update_scenario(db, scenario_id, updates)
     if scenario is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
-    return scenario
+    return _with_planned(db, scenario)
 
 
 @router.delete("/scenarios/{scenario_id}")

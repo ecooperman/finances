@@ -23,13 +23,14 @@ from .funds import current_month
 log = logging.getLogger(__name__)
 
 _CACHE_TTL_SECONDS = 30
-_cache = {"at": 0.0, "data": None}
+_cache = {"at": 0.0, "data": None, "ok": True}
 
 
 def fetch_trip_costs() -> List[dict]:
     """`GET {TRIPS_API_BASE}/api/trips/cost-summary`, cached for 30s.
     Returns [] (never raises) if trip-planning is unreachable or errors -
-    the forecast just shows nothing in that case."""
+    the forecast then has no trips, and `trips_reachable()` says why, so the
+    pages can warn instead of quietly dropping every trip from the numbers."""
     now = time.monotonic()
     if _cache["data"] is not None and now - _cache["at"] < _CACHE_TTL_SECONDS:
         return _cache["data"]
@@ -43,9 +44,17 @@ def fetch_trip_costs() -> List[dict]:
     except Exception as exc:  # noqa: BLE001 - any failure = "trips unavailable"
         log.warning("trip cost fetch failed (%s): %s", TRIPS_API_BASE, exc)
         data = []
+        _cache["ok"] = False
+    else:
+        _cache["ok"] = True
     _cache["at"] = now
     _cache["data"] = data
     return data
+
+
+def trips_reachable() -> bool:
+    """Whether the last attempt to read trips from trip-planning worked. True until a call fails."""
+    return _cache["ok"]
 
 
 def _trip_month(start_date: Optional[str]) -> Optional[str]:
@@ -95,7 +104,7 @@ def trip_forecasts(db: Session, as_of_month: Optional[str] = None) -> dict:
         {"upcoming": upcoming, "no_date": no_date, "excluded": excluded}[bucket].append(row)
 
     upcoming.sort(key=lambda r: r["trip_month"])
-    return {"upcoming": upcoming, "no_date": no_date, "excluded": excluded}
+    return {"upcoming": upcoming, "no_date": no_date, "excluded": excluded, "reachable": trips_reachable()}
 
 
 def trips_summary(db: Session, as_of_month: Optional[str] = None) -> dict:
@@ -103,4 +112,5 @@ def trips_summary(db: Session, as_of_month: Optional[str] = None) -> dict:
     return {
         "upcoming_count": len(fc["upcoming"]) + len(fc["no_date"]),
         "monthly_total_cents": sum(r["monthly_contribution_cents"] for r in fc["upcoming"]),
+        "reachable": fc["reachable"],
     }

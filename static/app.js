@@ -452,6 +452,12 @@ function renderStatus() {
   if (TRIPS_STATUS && TRIPS_STATUS.upcoming_count) {
     text += `  ·  Trips: ${TRIPS_STATUS.upcoming_count} upcoming, ${fmtMoney(TRIPS_STATUS.monthly_total_cents)}/mo`;
   }
+  if (TRIPS_STATUS && TRIPS_STATUS.reachable === false) {
+    text += "  ·  Trips unavailable (can't reach trip-planning, so none are counted)";
+  }
+  if (LISTS_STATUS && LISTS_STATUS.reachable === false) {
+    text += "  ·  Linked lists unavailable (can't reach Lists)";
+  }
   if (LISTS_STATUS && LISTS_STATUS.upcoming_count) {
     text += `  ·  Linked lists: ${LISTS_STATUS.upcoming_count}, ${fmtMoney(LISTS_STATUS.monthly_total_cents)}/mo`;
   }

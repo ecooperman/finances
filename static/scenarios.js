@@ -444,23 +444,32 @@ function orderAdjustments(list, mode) {
 
 // --- one-time total --------------------------------------------------
 
-// What the scenario's one-time lines add up to, overall and month by month
-// (the server works it out: see schemas.OneTimeSummary).
-function oneTimeSummary(oneTime) {
+// What the scenario's one-time lines AND its planned lists / trips add up to, overall and month by
+// month (the server works it out: see schemas.OneTimeSummary and PlannedSummary). A planned list or
+// trip counts as one lump sum on its due month.
+function oneTimeSummary(oneTime, planned) {
   const el_ = Global.el;
-  const parts = [`${oneTime.count} one-time line${oneTime.count === 1 ? "" : "s"}`];
-  if (oneTime.in_cents) parts.push(`${fmtMoney(oneTime.out_cents)} out, ${fmtMoney(oneTime.in_cents)} in`);
+  const count = oneTime.count + planned.count;
+  const cost = oneTime.cost_cents + planned.cost_cents;
+  const parts = [];
+  if (oneTime.count) parts.push(`${oneTime.count} one-time line${oneTime.count === 1 ? "" : "s"}`);
+  if (planned.count) parts.push(`${planned.count} planned list${planned.count === 1 ? "" : "s"} / trip${planned.count === 1 ? "" : "s"}`);
+  if (oneTime.in_cents) parts.push(`${fmtMoney(oneTime.out_cents + planned.cost_cents)} out, ${fmtMoney(oneTime.in_cents)} in`);
   const box = el_("div", { class: "fin-adj-total" }, [
     el_("div", { class: "fin-adj-total-head" }, [
       el_("span", { class: "fin-adj-total-label", text: "Total cost" }),
-      el_("span", { class: "fin-adj-total-amount", text: fmtMoney(oneTime.cost_cents) }),
+      el_("span", { class: "fin-adj-total-amount", text: fmtMoney(cost) }),
     ]),
     el_("div", { class: "fin-adj-total-sub", text: parts.join(" · ") }),
   ]);
-  if (oneTime.by_month.length > 1) {
+  const byMonth = new Map();
+  for (const m of [...oneTime.by_month, ...planned.by_month]) {
+    byMonth.set(m.month, (byMonth.get(m.month) || 0) + m.out_cents - m.in_cents);
+  }
+  if (byMonth.size > 1) {
     box.appendChild(
-      el_("div", { class: "fin-adj-total-months" }, oneTime.by_month.map((m) =>
-        el_("span", { class: "fin-adj-total-month", text: `${monthLabel(m.month)}: ${fmtMoney(m.out_cents - m.in_cents)}` })
+      el_("div", { class: "fin-adj-total-months" }, [...byMonth.entries()].sort().map(([month, cents]) =>
+        el_("span", { class: "fin-adj-total-month", text: `${monthLabel(month)}: ${fmtMoney(cents)}` })
       ))
     );
   }
@@ -599,7 +608,8 @@ function card(scenario) {
 
   inner.appendChild(metaForm);
   inner.appendChild(changesHead);
-  if (oneTime.count) inner.appendChild(oneTimeSummary(oneTime));
+  const planned = scenario.planned || { count: 0, cost_cents: 0, by_month: [] };
+  if (oneTime.count || planned.count) inner.appendChild(oneTimeSummary(oneTime, planned));
   inner.appendChild(adjList);
   inner.appendChild(addChangeBtn);
   inner.appendChild(adjForm);

@@ -373,6 +373,7 @@ class TripForecasts(BaseModel):
     upcoming: List[TripForecastRow] = []
     no_date: List[TripForecastRow] = []
     excluded: List[TripForecastRow] = []
+    reachable: bool = True  # False when trip-planning could not be read (no trips are counted then)
 
 
 class TripSettlementUpdate(BaseModel):
@@ -442,6 +443,7 @@ class LinkedListUpdate(BaseModel):
 class TripsSummary(BaseModel):
     upcoming_count: int
     monthly_total_cents: int
+    reachable: bool = True  # False when the source app could not be read
 
 
 # ---------------------------------------------------------------------------
@@ -645,10 +647,21 @@ class OneTimeSummary(BaseModel):
     by_month: List[OneTimeMonth]  # in date order, only months that have lines
 
 
+class PlannedSummary(BaseModel):
+    """What the scenario's planned lists and trips add up to, as lump sums (read live, so it is filled
+    in by the router, not computed from the stored adjustments). Counts only those that cost something
+    and that the real budget is not already counting."""
+
+    count: int = 0
+    cost_cents: int = 0
+    by_month: List[OneTimeMonth] = []  # by the month each is due; in_cents is always 0
+
+
 class Scenario(ScenarioBase):
     model_config = ConfigDict(from_attributes=True)
     id: int
     adjustments: List[ScenarioAdjustment] = []
+    planned: PlannedSummary = PlannedSummary()
 
     @computed_field
     @property

@@ -91,7 +91,7 @@ def test_excluded_is_visible_but_contributes_nothing(db, set_lists):
     crud.update_linked_list(db, 1, schemas.LinkedListUpdate(excluded=True))
     fc = svc.list_forecasts(db, "2026-09")
     assert fc["upcoming"] == [] and fc["excluded"][0]["monthly_contribution_cents"] == 0
-    assert svc.lists_summary(db, "2026-09") == {"upcoming_count": 0, "monthly_total_cents": 0}
+    assert svc.lists_summary(db, "2026-09") == {"upcoming_count": 0, "monthly_total_cents": 0, "reachable": True}
 
 
 def test_settling_records_a_real_transaction_and_drops_it_from_the_forecast(db, set_lists):
@@ -168,7 +168,7 @@ def test_link_edit_settle_and_unlink_over_http(client, set_lists, db):
     assert [r["name"] for r in body["upcoming"]] == ["Move to Portland"]
     assert [a["name"] for a in body["available"]] == ["Wedding"]
     assert client.get("/api/linked-lists/summary", params={"month": "2026-08"}).json() == {
-        "upcoming_count": 1, "monthly_total_cents": 75_000,
+        "upcoming_count": 1, "monthly_total_cents": 75_000, "reachable": True,
     }
 
     assert client.patch("/api/linked-lists/1", json={"override_amount_cents": 400_000}).json()["override_amount_cents"] == 400_000
@@ -297,3 +297,102 @@ def test_the_adjustment_needs_its_link_fields(client, db):
     assert client.post(url, json=body).status_code == 200
     for missing in ("link_kind", "link_id", "date", "name"):
         assert client.post(url, json={k: v for k, v in body.items() if k != missing}).status_code == 422, missing
+
+
+# --- the scenario's Total cost counts planned lists and trips -------------------------------
+
+
+def _planned_scenario(client, db, *bodies):
+    sc = models.Scenario(name="Move")
+    db.add(sc)
+    db.commit()
+    for body in bodies:
+        assert client.post(f"/api/scenarios/{sc.id}/adjustments", json={"kind": "add", "add_kind": "planned", **body}).status_code == 200
+    return sc.id
+
+
+def test_the_scenario_total_adds_up_planned_lists_and_trips(client, set_lists, db, monkeypatch):
+    set_lists([_list(1, "Move", 300_000), _list(2, "Sofa", 50_000)])
+    monkeypatch.setattr(trips_service, "fetch_trip_costs", lambda: [
+        {"id": 9, "location": "Hawaii", "start_date": None, "total_cost_cents": 200_000},
+    ])
+    sid = _planned_scenario(
+        client, db,
+        dict(name="Move", link_kind="list", link_id=1, date="2026-11-20"),
+        dict(name="Sofa", link_kind="list", link_id=2, date="2026-12-05", override_amount_cents=70_000),
+        dict(name="Hawaii", link_kind="trip", link_id=9, date="2026-11-30"),
+    )
+    planned = client.get(f"/api/scenarios/{sid}").json()["planned"]
+    assert (planned["count"], planned["cost_cents"]) == (3, 300_000 + 70_000 + 200_000)  # override beats the list's 50,000
+    assert planned["by_month"] == [
+        {"month": "2026-11", "out_cents": 500_000, "in_cents": 0},
+        {"month": "2026-12", "out_cents": 70_000, "in_cents": 0},
+    ]
+    assert client.get("/api/scenarios").json()[0]["planned"]["cost_cents"] == 570_000
+
+
+def test_the_scenario_total_skips_what_the_budget_already_counts_or_costs_nothing(client, set_lists, db):
+    set_lists([_list(1, "Move", 300_000), _list(2, "Empty", 0)])
+    _link(db, list_id=1)  # counted in the real budget: not the scenario's cost
+    sid = _planned_scenario(
+        client, db,
+        dict(name="Move", link_kind="list", link_id=1, date="2026-11-20"),
+        dict(name="Empty", link_kind="list", link_id=2, date="2026-11-20"),
+        dict(name="Gone", link_kind="list", link_id=99, date="2026-11-20"),
+    )
+    assert client.get(f"/api/scenarios/{sid}").json()["planned"] == {"count": 0, "cost_cents": 0, "by_month": []}
+
+
+def test_a_scenario_with_no_planned_lines_has_an_empty_summary(client, db):
+    sc = models.Scenario(name="Plain")
+    db.add(sc)
+    db.commit()
+    assert client.get(f"/api/scenarios/{sc.id}").json()["planned"] == {"count": 0, "cost_cents": 0, "by_month": []}
+
+
+# --- trips: say so when trip-planning cannot be read ----------------------------------------
+
+
+def test_trips_report_unreachable_when_trip_planning_cannot_be_read(db, monkeypatch):
+    def refuse(*args, **kwargs):
+        raise OSError("connection refused")
+
+    monkeypatch.undo()  # the autouse fixtures stub the fetch; this test exercises the real one
+    trips_service._cache.update(at=0.0, data=None, ok=True)
+    monkeypatch.setattr(trips_service.httpx, "get", refuse)
+    fc = trips_service.trip_forecasts(db, "2026-09")
+    assert fc["upcoming"] == [] and fc["reachable"] is False
+    assert trips_service.trips_summary(db, "2026-09")["reachable"] is False
+
+
+def test_trips_are_reachable_again_once_a_call_works(db, monkeypatch):
+    class Reply:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return []
+
+    monkeypatch.undo()
+    trips_service._cache.update(at=0.0, data=None, ok=False)
+    monkeypatch.setattr(trips_service.httpx, "get", lambda *a, **k: Reply())
+    assert trips_service.trip_forecasts(db, "2026-09")["reachable"] is True
+
+
+def test_the_trips_api_carries_the_flag(client, monkeypatch):
+    monkeypatch.undo()
+    trips_service._cache.update(at=0.0, data=None, ok=True)
+
+    def refuse(*args, **kwargs):
+        raise OSError("down")
+
+    monkeypatch.setattr(trips_service.httpx, "get", refuse)
+    assert client.get("/api/trips").json()["reachable"] is False
+    assert client.get("/api/trips/summary").json()["reachable"] is False
+
+
+def test_linked_lists_summary_only_warns_once_something_is_linked(db, set_lists):
+    set_lists(None)
+    assert svc.lists_summary(db, "2026-09")["reachable"] is True  # nothing linked: nothing to lose
+    _link(db)
+    assert svc.lists_summary(db, "2026-09")["reachable"] is False

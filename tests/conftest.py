@@ -46,6 +46,7 @@ def _no_live_trip_fetch(monkeypatch):
     """
     trips_service._cache["data"] = None
     trips_service._cache["at"] = 0.0
+    trips_service._cache["ok"] = True
     monkeypatch.setattr(trips_service, "fetch_trip_costs", lambda: [])
 
 

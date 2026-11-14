@@ -805,8 +805,12 @@ async function loadTrips() {
   tripsList.innerHTML = "";
   rows.forEach((r) => tripsList.appendChild(r));
   const total = data.upcoming.length + data.no_date.length + data.excluded.length;
-  tripsEmpty.textContent = "No upcoming trips.";
-  tripsEmpty.classList.toggle("hidden", total > 0);
+  // Nothing back from trip-planning looks the same as "no trips", so say which it is: while it
+  // cannot be read, no trip is counted anywhere in the numbers.
+  tripsEmpty.textContent = data.reachable === false
+    ? "Couldn't reach the trip-planning app, so no trips are shown and none are counted in the totals right now."
+    : "No upcoming trips.";
+  tripsEmpty.classList.toggle("hidden", total > 0 && data.reachable !== false);
   tripsCount.textContent = total ? `${data.upcoming.length} upcoming` : "";
 }
 

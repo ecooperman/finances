@@ -111,7 +111,10 @@ def list_forecasts(db: Session, as_of_month: Optional[str] = None) -> dict:
 
 def lists_summary(db: Session, as_of_month: Optional[str] = None) -> dict:
     fc = list_forecasts(db, as_of_month)
+    linked = len(fc["upcoming"]) + len(fc["no_date"]) + len(fc["excluded"])
     return {
         "upcoming_count": len(fc["upcoming"]) + len(fc["no_date"]),
         "monthly_total_cents": sum(r["monthly_contribution_cents"] for r in fc["upcoming"]),
+        # unreachable only matters once something is linked
+        "reachable": fc["reachable"] or linked == 0,
     }
