@@ -296,17 +296,23 @@ function renderCalendar(month, rows, opening) {
         });
         const net = dayNet(entries);
         const run = CAL_RUN.get(dayNum);
+        // Each figure carries an exact version and a whole-dollar one; the stylesheet shows the short one
+        // on a phone, where a cell is too narrow for "-$4,925.37" (it used to be clipped).
+        // The running-total sigma is its own span so a very narrow screen can drop it and keep the number whole.
+        const calAmount = (prefix, cents) => [
+          prefix ? el("span", { class: "fin-cal-sigma", text: prefix }) : null,
+          el("span", { class: "fin-cal-full", text: fmtSignedMoney(cents) }),
+          el("span", { class: "fin-cal-short", text: fmtSignedWhole(cents) }),
+        ];
         cell.appendChild(el("div", {
           class: "fin-cal-net " + (net < 0 ? "fin-net-neg" : "fin-net-pos"),
-          text: fmtSignedMoney(net),
           title: "Net for the day",
-        }));
+        }, calAmount("", net)));
         cell.appendChild(el("div", {
           class: "fin-cal-run " + (run < 0 ? "fin-net-neg" : "fin-net-pos"),
-          text: "Σ " + fmtSignedMoney(run),
           title: opening ? "Running balance through this day (opening balance + the month so far)"
             : "Running total for the month through this day",
-        }));
+        }, calAmount("Σ ", run)));
       }
     }
     grid.appendChild(cell);

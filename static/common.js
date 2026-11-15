@@ -29,6 +29,25 @@ function fmtSignedMoney(cents) {
   return sign + fmtMoney(Math.abs(cents));
 }
 
+// Whole dollars with a sign, for tight spots such as the calendar cells on a phone: "-$4,925".
+// (Rounded, so it's a glance figure: the day's popup and every other screen keep the exact cents.)
+function fmtSignedWhole(cents) {
+  const sign = cents < 0 ? "-" : "+";
+  return sign + "$" + Math.round(Math.abs(cents) / 100).toLocaleString("en-US");
+}
+
+// A cost: money out minus money in. When money in wins the figure is negative, which "-$300.00"
+// reads badly as a cost, so say what happened instead: "$300.00 back in". Pair it with
+// costClass() to colour that case green. (Net figures keep fmtSignedMoney: a net below zero is a
+// real shortfall.)
+function fmtCost(cents) {
+  return cents < 0 ? `${fmtMoney(-cents)} back in` : fmtMoney(cents);
+}
+
+function costClass(cents) {
+  return cents < 0 ? "fin-net-pos" : "";
+}
+
 // Parse a user-typed dollar amount ("3200", "3,200.50", "$3,200.5") into
 // integer cents. Returns null if it isn't a number.
 function dollarsToCents(value) {

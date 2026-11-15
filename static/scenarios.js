@@ -458,7 +458,7 @@ function oneTimeSummary(oneTime, planned) {
   const box = el_("div", { class: "fin-adj-total" }, [
     el_("div", { class: "fin-adj-total-head" }, [
       el_("span", { class: "fin-adj-total-label", text: "Total cost" }),
-      el_("span", { class: "fin-adj-total-amount", text: fmtMoney(cost) }),
+      el_("span", { class: `fin-adj-total-amount ${costClass(cost)}`.trim(), text: fmtCost(cost) }),
     ]),
     el_("div", { class: "fin-adj-total-sub", text: parts.join(" · ") }),
   ]);
@@ -469,7 +469,7 @@ function oneTimeSummary(oneTime, planned) {
   if (byMonth.size > 1) {
     box.appendChild(
       el_("div", { class: "fin-adj-total-months" }, [...byMonth.entries()].sort().map(([month, cents]) =>
-        el_("span", { class: "fin-adj-total-month", text: `${monthLabel(month)}: ${fmtMoney(cents)}` })
+        el_("span", { class: `fin-adj-total-month ${costClass(cents)}`.trim(), text: `${monthLabel(month)}: ${fmtCost(cents)}` })
       ))
     );
   }
@@ -489,7 +489,7 @@ function card(scenario) {
     el_("span", { class: "item-summary-title", text: scenario.name }),
     el_("span", { class: "item-badge item-badge-muted", text: `${n} change${n === 1 ? "" : "s"}` }),
     // The one-time lines' total, visible without opening the card.
-    oneTime.count ? el_("span", { class: "item-badge item-badge-accent", title: "What the one-time lines add up to", text: `${fmtMoney(oneTime.cost_cents)} one-time` }) : null,
+    oneTime.count ? el_("span", { class: "item-badge item-badge-accent", title: "What the one-time lines add up to", text: oneTime.cost_cents < 0 ? `one-time: ${fmtCost(oneTime.cost_cents)}` : `${fmtCost(oneTime.cost_cents)} one-time` }) : null,
     el_("a", { class: "item-summary-icon-link", href: `/?scenario=${scenario.id}`, title: "Open in Overview", "data-icon": "calendar", "aria-hidden": "true" }),
     el_("span", { class: "item-chevron", "aria-hidden": "true", text: "▸" }),
   ]);

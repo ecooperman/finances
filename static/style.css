@@ -238,6 +238,46 @@
   gap: 8px;
 }
 
+/* Phones: the filters become an even two-column grid instead of ragged wrapped boxes. The ones that
+   hold more than a dropdown (month + All time, status, scenario) take the full width. */
+@media (max-width: 520px) {
+  .fin-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: end;
+    gap: 12px 10px;
+  }
+
+  .fin-filter {
+    min-width: 0;
+  }
+
+  .fin-filter select,
+  .fin-filter input[type="month"] {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .fin-filter .multiselect {
+    display: block;
+  }
+
+  .fin-filter .multiselect-trigger {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #month-filter,
+  #status-filter,
+  .fin-filter:has(#filter-scenario) {
+    grid-column: 1 / -1;
+  }
+
+  .fin-filter-pair input[type="month"] {
+    flex: 1;
+  }
+}
+
 .fin-filters .secondary-btn {
   padding: 8px 12px;
 }
@@ -810,6 +850,36 @@
   .fin-cal-net,
   .fin-cal-run {
     font-size: 9px;
+  }
+  .fin-cal-full {
+    display: none;
+  }
+}
+
+.fin-cal-short {
+  display: none;
+}
+
+@media (max-width: 560px) {
+  .fin-cal-short {
+    display: inline;
+  }
+}
+
+@media (max-width: 359px) {
+  .fin-cal-sigma {
+    display: none;
+  }
+
+  /* A cell is ~40px wide here: a touch smaller and tighter so "-$4,925" is never cut off. */
+  .fin-cal-cell {
+    padding: 1px;
+  }
+
+  .fin-cal-net,
+  .fin-cal-run {
+    font-size: 8px;
+    letter-spacing: -0.02em;
   }
 }
 
