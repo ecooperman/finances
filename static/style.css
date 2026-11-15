@@ -195,7 +195,9 @@
   flex: none;
 }
 
-.fin-trip-override {
+/* Scoped under .fin-trip-actions (like the date box above): a bare class lost to the generic
+   input[type="text"] width rule, so the override box stretched across the whole card. */
+.fin-trip-actions .fin-trip-override {
   width: 150px;
   flex: none;
 }
