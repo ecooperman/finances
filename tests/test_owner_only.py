@@ -156,3 +156,32 @@ def test_locally_me_is_the_dev_user_with_no_front_door(db):
         assert me["email"] == config.DEV_USER_EMAIL and me["logout_url"] is None
     finally:
         app.dependency_overrides.clear()
+
+
+# --- cross-app request forgery -------------------------------------------------------------------------------------------
+
+
+def test_every_route_that_changes_something_refuses_a_request_from_another_app_or_site(production, key):
+    """The sign-in cookie covers every subdomain and subdomains are the same site, so a page on another app could make
+    the owner's browser change things here. The browser marks such a request (Sec-Fetch-Site), and every route that
+    changes anything must refuse it even with a valid administrator cookie (shared_python.csrf)."""
+    production.cookies.set("oidc_session", session(key, "owner@example.com"))
+    tried = 0
+    for method, shown, path in every_route():
+        if method not in ("POST", "PUT", "PATCH", "DELETE"):
+            continue
+        for site in ("same-site", "cross-site"):
+            resp = production.request(method, path, json={}, headers={"Sec-Fetch-Site": site, "Origin": "https://lists.example.org"})
+            assert resp.status_code == 403 and "didn't come from this app" in resp.text, (method, shown, site, resp.status_code)
+            tried += 1
+    assert tried > 4
+
+
+def test_the_owner_can_still_make_changes_from_the_apps_own_pages(production, key):
+    production.cookies.set("oidc_session", session(key, "owner@example.com"))
+    for method, shown, path in every_route():
+        if method == "POST" and "{" not in shown:
+            resp = production.post(path, json={}, headers={"Sec-Fetch-Site": "same-origin", "Origin": str(production.base_url).rstrip("/")})
+            assert "didn't come from this app" not in resp.text
+            return
+    pytest.fail("no plain POST route found")
