@@ -6,6 +6,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from shared_python import auth, oidc_login
+
+from . import access, config
 from .config import SHARED_ASSETS_BASE
 from .routers import (
     balance,
@@ -47,12 +50,21 @@ def _get_git_sha() -> str:
 GIT_SHA = _get_git_sha()
 
 app = FastAPI(title="Finances")
+access.install(app)  # the whole app is private to its administrators
 templates = Jinja2Templates(directory="templates")
 
 
 @app.get("/api/version")
 def get_version():
     return {"version": GIT_SHA}
+
+
+@app.get("/api/me")
+def get_me(request: Request):
+    """Who is signed in, for the page header's email and Log out (the shared Global.mountUserBadge reads this). The
+    whole app is already private to its administrators (app/access.py), so whoever gets here is one."""
+    email = auth.request_email(request, config.DEV_USER_EMAIL).strip().lower()
+    return {"email": email, "is_admin": True, "logout_url": oidc_login.logout_url(request)}
 
 
 # Each HTML page is a Jinja2 template rendered by an explicit route (not

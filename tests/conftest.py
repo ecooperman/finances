@@ -15,6 +15,8 @@ from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
+from shared_python import settings as shared_settings  # noqa: E402
+
 from app.database import Base  # noqa: E402
 from app.services import linked_lists as linked_lists_service  # noqa: E402
 from app.services import trips as trips_service  # noqa: E402
@@ -56,3 +58,14 @@ def _no_live_list_fetch(monkeypatch):
     fixture (tests/test_linked_lists.py) to supply data, or None for "unreachable"."""
     linked_lists_service.clear_cache()
     monkeypatch.setattr(linked_lists_service, "fetch_list_costs", lambda: [])
+
+
+@pytest.fixture(autouse=True)
+def _local_sign_in(monkeypatch):
+    """Whatever sign-in settings the developer's shell has, tests start local, with the dev user as the administrator."""
+    for name in (
+        "CF_TEAM_DOMAIN", "CF_ACCESS_AUD", "OIDC_ISSUER", "OIDC_JWKS_URL", "OIDC_AUDIENCE", "OIDC_COOKIE", "OIDC_CLIENT_ID",
+        "OIDC_CLIENT_SECRET", "OIDC_COOKIE_DOMAIN", "OIDC_RETURN_HOSTS", "OIDC_LOGIN_URL", "OIDC_LOGOUT_RETURN_PATH",
+    ):
+        monkeypatch.setattr(shared_settings, name, None)
+    monkeypatch.setattr(shared_settings, "ENV", "local")

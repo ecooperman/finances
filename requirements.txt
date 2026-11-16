@@ -6,3 +6,4 @@ sqlalchemy
 alembic==1.20.0
 pytest
 httpx
+-e ../shared-python

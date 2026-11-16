@@ -18,3 +18,7 @@ Global.buildNav([
   { href: "/settings.html", icon: "settings", label: "Settings", active: active === "settings" },
   { icon: "refresh", label: "Refresh", onclick: () => location.reload() },
 ]);
+
+// The signed-in person's email and a Log out link in the page header (this app signs in through the shared
+// front door; /api/me says where Log out goes).
+Global.mountUserBadge();

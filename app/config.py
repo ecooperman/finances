@@ -12,6 +12,14 @@ PORT = 8080
 ENV = os.environ.get("APP_ENV", "local")
 SHARED_ASSETS_BASE = "https://static.evancooperman.com" if ENV == "production" else "http://127.0.0.1:8070"
 
+# Who is signed in (shared_python): the whole app is private to its administrators, so everyone else is refused
+# (see app/access.py). ADMIN_EMAILS (comma-separated) comes from the shared secrets file on the droplet; locally
+# the dev user is one, and is who every request is treated as.
+DEV_USER_EMAIL = os.environ.get("DEV_USER_EMAIL", "dev@localhost.test").strip().lower()
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+if ENV != "production":
+    ADMIN_EMAILS.add(DEV_USER_EMAIL)
+
 # The trip-planning app's base URL, for the trip cost forecast (see
 # app/services/trips.py). Same value local and in production: both talk to
 # the trip-planning process directly on 127.0.0.1:8060, which sidesteps
