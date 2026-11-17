@@ -8,6 +8,7 @@ so the point of this file is that NOTHING one person does, with any id, in any r
 * Reading is filtered below the routes (shared_python.owned), writes that would cross over are refused there too, and
   the trip forecast and linked lists, which read the ADMINISTRATOR's other apps with their service tokens, give anyone else
   nothing."""
+import sqlite3
 import time
 from contextlib import contextmanager
 from datetime import date
@@ -349,6 +350,7 @@ SPEC = {
     ("POST", "/api/linked-lists/{list_id}/settle"): ("admin", lambda a: {"json": {"date": "2026-11-12", "amount_cents": 100}}),
     ("POST", "/api/linked-lists/{list_id}/unsettle"): ("admin", lambda a: {}),
     ("GET", "/api/users"): ("admin", lambda a: {}),
+    ("GET", "/api/users/suggestions"): ("admin", lambda a: {}),
     ("POST", "/api/users"): ("admin", lambda a: {"json": {"email": "friend@example.com"}}),
     ("PATCH", "/api/users/{user_id}"): ("admin", lambda a: {"json": {"status": "removed"}}),
     ("DELETE", "/api/users/{user_id}/data"): ("admin", lambda a: {}),
@@ -730,3 +732,32 @@ def test_locally_the_dev_user_is_the_administrator_with_an_account_of_their_own(
         assert me["email"] == config.DEV_USER_EMAIL and me["is_admin"] and me["logout_url"] is None
     finally:
         app.dependency_overrides.clear()
+
+
+def fake_apps(tmp_path, monkeypatch, **emails_by_folder):
+    """Other apps' databases next to this one, each with the given people (see shared_python.directory)."""
+    for folder, (filename, emails) in emails_by_folder.items():
+        (tmp_path / folder).mkdir(exist_ok=True)
+        connection = sqlite3.connect(tmp_path / folder / filename)
+        connection.execute("CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT NOT NULL)")
+        connection.executemany("INSERT INTO users (email) VALUES (?)", [(e,) for e in emails])
+        connection.commit()
+        connection.close()
+    monkeypatch.setenv("PEOPLE_APPS_DIR", str(tmp_path))
+
+
+def test_suggestions_are_everyone_from_any_app_minus_people_already_here(two_people, client_for, tmp_path, monkeypatch):
+    fake_apps(
+        tmp_path, monkeypatch,
+        **{"lists": ("gifts.db", ["Zed@example.com", BOB]), "time-management": ("tasks.db", ["amy@example.com"])},
+    )
+    resp = client_for(OWNER).get("/api/users/suggestions")
+    assert resp.status_code == 200
+    # the owner and Bob already have accounts here, so they are not offered again; the rest are lowercased and sorted
+    assert resp.json() == ["amy@example.com", "zed@example.com"]
+
+
+def test_suggestions_say_who_uses_the_apps_so_only_an_administrator_gets_them(two_people, client_for, tmp_path, monkeypatch):
+    fake_apps(tmp_path, monkeypatch, lists=("gifts.db", ["secret-person@example.com"]))
+    resp = client_for(BOB).get("/api/users/suggestions")
+    assert resp.status_code == 403 and "secret-person" not in resp.text

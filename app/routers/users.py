@@ -6,7 +6,7 @@ cannot read another person's finances through this app, only manage who has an a
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from shared_python import accounts_gate
+from shared_python import accounts_gate, directory
 from shared_python.accounts_gate import Account
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,14 @@ def _out(user: models.User) -> schemas.UserOut:
 @router.get("", response_model=list[schemas.UserOut])
 def list_users(db: Session = Depends(get_db)):
     return [_out(u) for u in crud.list_users(db)]
+
+
+@router.get("/suggestions", response_model=list[str])
+def suggestions(db: Session = Depends(get_db)):
+    """Addresses to suggest in the Add box: everyone with an account in any of the apps, minus people who already have
+    access here (shared_python.directory). Administrators only - it says who else uses the apps."""
+    have = {u.email.lower() for u in db.query(models.User).filter(models.User.status == models.USER_ACTIVE)}
+    return [email for email in directory.known_emails() if email not in have]
 
 
 @router.post("", response_model=schemas.UserOut)
