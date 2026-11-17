@@ -5,7 +5,7 @@ anyone to be let in). Everyone's finances stay completely private to them either
 cannot read another person's finances through this app, only manage who has an account."""
 import re
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from shared_python import accounts_gate, directory
 from shared_python.accounts_gate import Account
 from sqlalchemy.orm import Session
@@ -27,21 +27,21 @@ def list_users(db: Session = Depends(get_db)):
     return [_out(u) for u in crud.list_users(db)]
 
 
-@router.get("/suggestions", response_model=list[str])
+@router.get("/suggestions", response_model=list[dict])
 def suggestions(db: Session = Depends(get_db)):
-    """Addresses to suggest in the Add box: everyone with an account in any of the apps, minus people who already have
+    """People to suggest in the Add box ({email, name}): everyone with an account in any of the apps, minus people who already have
     access here (shared_python.directory). Administrators only - it says who else uses the apps."""
     have = {u.email.lower() for u in db.query(models.User).filter(models.User.status == models.USER_ACTIVE)}
-    return [email for email in directory.known_emails() if email not in have]
+    return [person for person in directory.known_people() if person["email"] not in have]
 
 
 @router.post("", response_model=schemas.UserOut)
-def add_user(body: schemas.UserAdd, background: BackgroundTasks, db: Session = Depends(get_db), admin: Account = Depends(accounts_gate.require_admin)):
+def add_user(body: schemas.UserAdd, background: BackgroundTasks, db: Session = Depends(get_db), admin: Account = Depends(accounts_gate.require_admin), notify_them: bool = Query(True, alias="notify")):
     email = crud.normalize_email(body.email)
     if not _EMAIL.match(email) or email == crud.LEGACY_OWNER_EMAIL:
         raise HTTPException(status_code=400, detail="That doesn't look like an email address")
     user, changed = crud.add_user(db, email)
-    if changed:  # a new person, or a removed one restored: tell them (never someone who already had access)
+    if changed and notify_them:  # a new person, or a removed one restored: tell them (the dashboard's Users page sends one email for all the apps instead)
         background.add_task(notify.tell_let_in, user.email, admin.email)
     return _out(user)
 

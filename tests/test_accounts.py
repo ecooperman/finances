@@ -754,7 +754,7 @@ def test_suggestions_are_everyone_from_any_app_minus_people_already_here(two_peo
     resp = client_for(OWNER).get("/api/users/suggestions")
     assert resp.status_code == 200
     # the owner and Bob already have accounts here, so they are not offered again; the rest are lowercased and sorted
-    assert resp.json() == ["amy@example.com", "zed@example.com"]
+    assert [x["email"] for x in resp.json()] == ["amy@example.com", "zed@example.com"]
 
 
 def test_suggestions_say_who_uses_the_apps_so_only_an_administrator_gets_them(two_people, client_for, tmp_path, monkeypatch):
