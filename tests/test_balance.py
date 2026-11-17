@@ -106,9 +106,10 @@ def test_the_balance_ignores_filters_and_scenarios(db, chain_from_oct):
 
 
 def test_start_month_is_created_lazily_when_missing(db):
-    assert db.get(models.AppSetting, balance.START_KEY) is None
+    setting = lambda: db.query(models.AppSetting).filter_by(key=balance.START_KEY).first()  # noqa: E731
+    assert setting() is None
     compute_month(db, "2026-10")
-    assert db.get(models.AppSetting, balance.START_KEY).value == date.today().strftime("%Y-%m")
+    assert setting().value == date.today().strftime("%Y-%m")
 
 
 def test_api_set_and_clear(db, client, chain_from_oct):

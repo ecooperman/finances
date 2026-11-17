@@ -1,11 +1,39 @@
 from datetime import datetime
 from typing import List, Optional
 
+from shared_python import owned
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from . import models, schemas
+from .seed import seed_categories
 from .services import deferrals
+
+
+class BadReference(Exception):
+    """A request named a category, person, fund... that is not the caller's (or does not exist). Answered with a 400: nothing
+    says WHICH of the two it is, so ids cannot be used to find out what another person has."""
+
+
+# The ids a request can name, and what to call each in the message. Each must be one of the caller's own rows: the data
+# layer only ever finds the caller's rows (shared_python.owned), and shared_python.owned also refuses to save a row that
+# points at someone else's, so this is the friendly front of two backstops.
+_REFERENCES = {
+    "category_id": (models.Category, "category"),
+    "person_id": (models.Person, "person"),
+    "fund_id": (models.SinkingFund, "fund"),
+    "target_recurring_id": (models.RecurringItem, "recurring item"),
+    "target_fund_id": (models.SinkingFund, "fund"),
+    "target_transaction_id": (models.Transaction, "transaction"),
+}
+
+
+def check_references(db: Session, data: dict) -> None:
+    """Raise BadReference if `data` names an id that is not one of the caller's own rows."""
+    for field, (model, what) in _REFERENCES.items():
+        value = data.get(field)
+        if value is not None and db.query(model.id).filter(model.id == value).first() is None:
+            raise BadReference(f"That {what} doesn't exist")
 
 # ---------------------------------------------------------------------------
 # People
@@ -155,6 +183,7 @@ def recurring_reference_id_conflict(db: Session, reference_id, exclude_id=None):
 
 
 def create_recurring_item(db: Session, item: schemas.RecurringItemCreate):
+    check_references(db, item.model_dump())
     db_item = models.RecurringItem(**item.model_dump())
     db.add(db_item)
     db.commit()
@@ -166,6 +195,7 @@ def update_recurring_item(db: Session, item_id: int, updates: schemas.RecurringI
     db_item = get_recurring_item(db, item_id)
     if db_item is None:
         return None
+    check_references(db, updates.model_dump(exclude_unset=True))
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_item, field, value)
     if db_item.spread_daily and (db_item.frequency != "monthly" or db_item.direction != "out"):
@@ -216,6 +246,7 @@ def get_transaction(db: Session, txn_id: int):
 
 
 def create_transaction(db: Session, txn: schemas.TransactionCreate):
+    check_references(db, txn.model_dump())
     db_txn = models.Transaction(**txn.model_dump())
     db.add(db_txn)
     db.commit()
@@ -227,6 +258,7 @@ def update_transaction(db: Session, txn_id: int, updates: schemas.TransactionUpd
     db_txn = get_transaction(db, txn_id)
     if db_txn is None:
         return None
+    check_references(db, updates.model_dump(exclude_unset=True))
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_txn, field, value)
     db.commit()
@@ -332,6 +364,7 @@ def get_fund(db: Session, fund_id: int):
 
 def create_fund(db: Session, fund: schemas.FundCreate, default_start_month: str):
     data = fund.model_dump()
+    check_references(db, data)
     if not data.get("start_month"):
         data["start_month"] = default_start_month
     db_fund = models.SinkingFund(**data)
@@ -345,6 +378,7 @@ def update_fund(db: Session, fund_id: int, updates: schemas.FundUpdate):
     db_fund = get_fund(db, fund_id)
     if db_fund is None:
         return None
+    check_references(db, updates.model_dump(exclude_unset=True))
     for field, value in updates.model_dump(exclude_unset=True).items():
         setattr(db_fund, field, value)
     db.commit()
@@ -559,6 +593,7 @@ def get_adjustment(db: Session, adjustment_id: int):
 
 
 def add_adjustment(db: Session, scenario_id: int, adj: schemas.ScenarioAdjustmentCreate):
+    check_references(db, adj.model_dump())
     db_adj = models.ScenarioAdjustment(scenario_id=scenario_id, **adj.model_dump())
     db.add(db_adj)
     db.commit()
@@ -570,6 +605,7 @@ def update_adjustment(db: Session, adjustment_id: int, adj: schemas.ScenarioAdju
     db_adj = get_adjustment(db, adjustment_id)
     if db_adj is None:
         return None
+    check_references(db, adj.model_dump())
     # Full-body replace - clear every non-identity column first so switching
     # an adjustment's `kind` doesn't leave stale fields from the old shape.
     payload = adj.model_dump()
@@ -591,3 +627,94 @@ def delete_adjustment(db: Session, adjustment_id: int) -> bool:
     db.delete(db_adj)
     db.commit()
     return True
+
+
+# ---------------------------------------------------------------------------
+# Accounts
+# ---------------------------------------------------------------------------
+# The users table is not an owned table (it is how ownership is decided), so these are the only queries that run
+# without a person in scope, apart from seeding a new account's default categories (inside THEIR scope).
+
+LEGACY_OWNER_EMAIL = "legacy-owner@finances.invalid"
+
+
+def normalize_email(raw: str) -> str:
+    return (raw or "").strip().lower()
+
+
+def get_user_by_email(db: Session, email: str):
+    return db.query(models.User).filter(models.User.email == normalize_email(email)).first()
+
+
+def get_user(db: Session, user_id: int):
+    return db.query(models.User).filter(models.User.id == user_id).first()
+
+
+def list_users(db: Session):
+    return db.query(models.User).filter(models.User.email != LEGACY_OWNER_EMAIL).order_by(func.lower(models.User.email)).all()
+
+
+def _seed_new_account(db: Session, user) -> None:
+    with owned.scope(user.id):
+        seed_categories(db)
+
+
+def adopt_or_create_admin(db: Session, email: str):
+    """An administrator's account, made the first time they sign in. If the data that existed before accounts is
+    still parked on the placeholder, they take it over by giving it their email: it all becomes theirs without a
+    single row moving."""
+    email = normalize_email(email)
+    existing = get_user_by_email(db, email)
+    if existing is not None:
+        return existing
+    legacy = db.query(models.User).filter(models.User.email == LEGACY_OWNER_EMAIL).first()
+    if legacy is not None:
+        legacy.email = email
+        user = legacy
+        db.commit()
+    else:
+        user = models.User(email=email)
+        db.add(user)
+        db.commit()
+        _seed_new_account(db, user)
+    return user
+
+
+def add_user(db: Session, email: str):
+    """Let someone in (an administrator's decision). Returns (user, changed): a person whose access was removed is
+    restored, and someone who already has access is left as they are."""
+    email = normalize_email(email)
+    user = get_user_by_email(db, email)
+    if user is not None:
+        restored = user.status != models.USER_ACTIVE
+        user.status = models.USER_ACTIVE
+        db.commit()
+        return user, restored
+    user = models.User(email=email)
+    db.add(user)
+    db.commit()
+    _seed_new_account(db, user)
+    return user, True
+
+
+def set_user_status(db: Session, user, status: str):
+    user.status = status
+    db.commit()
+    return user
+
+
+def delete_user_data(db: Session, user_id: int) -> dict:
+    """Permanently delete everything a person owns. Runs inside THEIR scope (never anyone else's), children first."""
+    counts = {}
+    with owned.scope(user_id):
+        for key, model in (
+            ("scenario_adjustments", models.ScenarioAdjustment), ("scenarios", models.Scenario),
+            ("deferrals", models.PaymentDeferral), ("daily_spend", models.DailySpend),
+            ("trip_settlements", models.TripSettlement), ("linked_lists", models.LinkedList),
+            ("transactions", models.Transaction), ("recurring_items", models.RecurringItem),
+            ("funds", models.SinkingFund), ("opening_balances", models.MonthOpeningBalance),
+            ("settings", models.AppSetting), ("categories", models.Category), ("people", models.Person),
+        ):
+            counts[key] = db.query(model).delete(synchronize_session=False)
+        db.commit()
+    return counts

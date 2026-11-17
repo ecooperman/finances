@@ -17,15 +17,6 @@ from app import crud, models, schemas
 from app.services.monthly import compute_month
 
 
-@pytest.fixture()
-def db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
-    yield session
-    session.close()
-
-
 def _person(db, name="Evan"):
     p = models.Person(name=name, color="#123456")
     db.add(p)

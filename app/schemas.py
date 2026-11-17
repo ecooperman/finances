@@ -890,3 +890,32 @@ class DailyBudgetItem(BaseModel):
 class DailyBudget(BaseModel):
     as_of: date_type
     items: List[DailyBudgetItem]
+
+
+# --- accounts ---------------------------------------------------------------------------------------------------
+
+
+class Me(BaseModel):
+    """Who is signed in (GET /api/me). `is_admin` marks an administrator, the only one who can let people in and the only
+    one offered what reads the administrator's own trips and lists; `can_use` says which, so the pages hide the rest."""
+
+    id: int
+    email: str
+    is_admin: bool
+    can_use: dict
+    logout_url: Optional[str] = None
+
+
+class UserOut(BaseModel):
+    id: int
+    email: str
+    status: str
+    is_admin: bool = False
+
+
+class UserAdd(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class UserStatus(BaseModel):
+    status: Literal["active", "removed"]

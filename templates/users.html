@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en" data-ui="v2">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Users · Finances</title>
+  <link rel="stylesheet" href="{{ shared_assets_base }}/theme.css" />
+  <link rel="icon" type="image/svg+xml" href="{{ shared_assets_base }}/logo.svg" />
+  <link rel="icon" type="image/png" sizes="64x64" href="{{ shared_assets_base }}/favicon.png" />
+  <script src="{{ shared_assets_base }}/theme-init.js"></script>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1>Users</h1>
+    <p class="subtitle">Who can use Finances.</p>
+  </header>
+
+  <div id="app-nav-mount"></div>
+
+  <main>
+    <div id="page-message" class="page-message hidden"></div>
+
+    <section class="fin-section">
+      <div class="list-header"><h2>Add someone</h2></div>
+      <p class="fin-note">Lets them into Finances: they can create an account (a passkey is quickest) and are emailed how. Only administrators can invite. Everyone's finances are completely private to them, and you can't see anyone else's. Adding someone you removed restores them.</p>
+      <div id="add-user"></div>
+    </section>
+
+    <section class="fin-section">
+      <div class="list-header"><h2>People with access</h2></div>
+      <p class="fin-note">Removing someone only stops them using Finances. What they own stays private and untouched until you delete it, and restoring them puts everything back.</p>
+      <div id="active-users" class="item-list"></div>
+    </section>
+
+    <section id="removed-section" class="fin-section hidden">
+      <div class="list-header"><h2>Removed</h2></div>
+      <p class="fin-note">These people can't sign in to Finances. Deleting their data erases every item, transaction, fund, scenario and category they own and can't be undone; their email stays here, removed.</p>
+      <div id="removed-users" class="item-list"></div>
+    </section>
+
+    <div id="app-version"></div>
+  </main>
+
+  <script src="{{ shared_assets_base }}/theme.js"></script>
+  <script src="{{ shared_assets_base }}/icons.js"></script>
+  <script src="version.js"></script>
+  <script src="common.js"></script>
+  <script src="nav.js"></script>
+  <script src="users.js"></script>
+</body>
+</html>

@@ -15,6 +15,7 @@ let CATEGORIES = [];
 let RECURRING = [];
 let FUNDS = [];
 let TRANSACTIONS = []; // recent + upcoming one-offs, for the remove/modify picker
+let CAN_PLAN = false; // planning a list or trip reads the ADMINISTRATOR's lists and trips apps, so only they are offered it
 let PLANNABLE = []; // lists and trips the real budget is not counting, for "List or trip"
 
 // MONTH_OPTIONS comes from common.js (loaded first).
@@ -105,7 +106,7 @@ function adjustmentFormHTML() {
       <div class="field-row">
         <div class="field">
           <label>Add a</label>
-          <select name="add_kind">${opt("recurring", "Recurring line")}${opt("one_time", "One-time payment")}${opt("fund", "Sinking fund")}${opt("planned", "List or trip (lump sum)")}</select>
+          <select name="add_kind">${opt("recurring", "Recurring line")}${opt("one_time", "One-time payment")}${opt("fund", "Sinking fund")}${CAN_PLAN ? opt("planned", "List or trip (lump sum)") : ""}</select>
         </div>
         <div class="field fin-adj-name-field">
           <label>Name</label>
@@ -657,6 +658,8 @@ async function load() {
 }
 
 async function init() {
+  const me = await Global.currentUser();
+  CAN_PLAN = !!(me && me.can_use && me.can_use.trips);
   [PEOPLE, CATEGORIES] = await Promise.all([loadPeople(), loadCategories()]);
   load();
 }

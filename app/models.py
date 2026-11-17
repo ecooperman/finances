@@ -10,10 +10,17 @@ Design notes:
   open for adding new values later without a table rebuild.
 - `person_id` being NULL means "joint / whole household" rather than
   attributed to one person.
+- Every table except `users` belongs to one account (`owner_id`, via
+  owned.OwnedMixin): nobody can see or change another person's rows, whatever a
+  route asks for (shared_python.owned filters every query and checks every write
+  below the routes' own code). Names and references that used to be unique
+  across the table (a category name, a provider reference, a month's opening
+  balance...) are unique per owner now.
 """
 
 from datetime import datetime
 
+from shared_python import owned
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -53,22 +60,44 @@ ADJUSTMENT_KINDS = ("add", "remove", "modify")
 FUND_ENTRY_UNITS = ("year", "month", "weeks", "months", "times_year")
 
 
-class Person(Base):
-    __tablename__ = "people"
+USER_ACTIVE = "active"
+USER_REMOVED = "removed"
+
+
+class User(Base):
+    """A person with an account in this app. Accounts are made only by an administrator (default-deny: signing in is
+    not enough) or, for an administrator, on first sign-in. Every other table belongs to one User (owned.OwnedMixin)
+    and nobody can see or change another's rows."""
+
+    __tablename__ = "users"
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False, unique=True)
+    email = Column(String, nullable=False, unique=True)
+    status = Column(String, nullable=False, default=USER_ACTIVE, server_default=USER_ACTIVE)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Person(Base, owned.OwnedMixin):
+    """A label rows can be tagged with (you, a partner, joint...). Just a name and colour to filter by: it is NOT an
+    account and gives nobody access to anything. Each account keeps its own list."""
+
+    __tablename__ = "people"
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_people_owner_id_name"),)
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String, nullable=False)  # unique per account
     color = Column(String, nullable=False, default="#888888")
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class Category(Base):
+class Category(Base, owned.OwnedMixin):
     __tablename__ = "categories"
+    __table_args__ = (UniqueConstraint("owner_id", "name", name="uq_categories_owner_id_name"),)
 
     id = Column(Integer, primary_key=True)
-    name = Column(String, nullable=False, unique=True)
+    name = Column(String, nullable=False)  # unique per account
     color = Column(String, nullable=False, default="#8a8f98")
     # "dark" or "light" - which text color reads legibly on top of `color`.
     text_color = Column(String, nullable=False, default="dark", server_default="dark")
@@ -78,7 +107,7 @@ class Category(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class RecurringItem(Base):
+class RecurringItem(Base, owned.OwnedMixin):
     """A known, repeating cash flow - a salary, the mortgage, HOA dues, a
     quarterly insurance premium. The "knowns" that make up the monthly
     baseline before any one-off activity.
@@ -88,9 +117,9 @@ class RecurringItem(Base):
     __table_args__ = (
         # A provider's reference for a "pay in N months" plan (Affirm calls
         # it a loan id, Klarna an order reference, PayPal something else) -
-        # enforcing uniqueness catches an accidental re-entry. SQLite treats
+        # enforcing uniqueness (per account) catches an accidental re-entry. SQLite treats
         # NULLs as distinct, so unset references never collide.
-        UniqueConstraint("reference_id", name="uq_recurring_reference_id"),
+        UniqueConstraint("owner_id", "reference_id", name="uq_recurring_owner_id_reference_id"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -142,7 +171,7 @@ class RecurringItem(Base):
     person = relationship("Person", lazy="joined")
 
 
-class Transaction(Base):
+class Transaction(Base, owned.OwnedMixin):
     """A one-off, dated cash flow worth recording - the ad-hoc things that
     "move the needle" (a big purchase, a bonus, a tax refund). Deliberately
     not meant for tracking every $10 coffee.
@@ -152,7 +181,7 @@ class Transaction(Base):
     __table_args__ = (
         # Dedup key for imported rows (see `source`); NULLs (manual entries)
         # don't collide under SQLite's NULL-distinct semantics.
-        UniqueConstraint("source", "external_id", name="uq_transaction_source_external"),
+        UniqueConstraint("owner_id", "source", "external_id", name="uq_transaction_owner_source_external"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -185,7 +214,7 @@ class Transaction(Base):
     fund = relationship("SinkingFund", lazy="joined")
 
 
-class SinkingFund(Base):
+class SinkingFund(Base, owned.OwnedMixin):
     """Money set aside every month for a cost you know is coming but can't
     schedule - vet visits, dog grooming, car repairs, gifts. Contributes
     `annual_amount_cents / 12` to the monthly *provisioning* total (never
@@ -222,7 +251,7 @@ class SinkingFund(Base):
     person = relationship("Person", lazy="joined")
 
 
-class TripSettlement(Base):
+class TripSettlement(Base, owned.OwnedMixin):
     """Finances' own view of a trip in the trip-planning app. Rows are
     created lazily the first time a trip is excluded, given an override, or
     marked paid. The trip's *cost* is read live from trip-planning (see
@@ -233,9 +262,10 @@ class TripSettlement(Base):
     """
 
     __tablename__ = "trip_settlements"
+    __table_args__ = (UniqueConstraint("owner_id", "trip_id", name="uq_trip_settlements_owner_id_trip_id"),)
 
     id = Column(Integer, primary_key=True)
-    trip_id = Column(Integer, nullable=False, unique=True)
+    trip_id = Column(Integer, nullable=False)
     # Hide from the forecast without marking it paid.
     excluded = Column(Boolean, nullable=False, default=False)
     # Use this instead of trip-planning's computed total (flights, etc.).
@@ -252,7 +282,7 @@ class TripSettlement(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class LinkedList(Base):
+class LinkedList(Base, owned.OwnedMixin):
     """A list in the lists app that has been linked into the budget as one lump-sum planned cost -
     finances' side of it, exactly like TripSettlement is for a trip. The list's cost (what is still to
     buy) is read live from lists and never stored here; this row holds only the choices made here: the
@@ -264,9 +294,10 @@ class LinkedList(Base):
     """
 
     __tablename__ = "linked_lists"
+    __table_args__ = (UniqueConstraint("owner_id", "list_id", name="uq_linked_lists_owner_id_list_id"),)
 
     id = Column(Integer, primary_key=True)
-    list_id = Column(Integer, nullable=False, unique=True)
+    list_id = Column(Integer, nullable=False)
     name = Column(String, nullable=False)
     due_date = Column(Date, nullable=True)
     excluded = Column(Boolean, nullable=False, default=False)
@@ -281,7 +312,7 @@ class LinkedList(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class PaymentDeferral(Base):
+class PaymentDeferral(Base, owned.OwnedMixin):
     """A payment that wasn't made in `month` and rolls into the next one.
 
     One row = "this amount went unpaid in <month>" (a recurring item's
@@ -320,7 +351,7 @@ class PaymentDeferral(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class DailySpend(Base):
+class DailySpend(Base, owned.OwnedMixin):
     """One real cost logged against a daily-spread recurring item on a day
     ("Uber to the airport", $34.20). A day's actual is the sum of its rows;
     a day with none is assumed to cost the planned daily allowance."""
@@ -338,16 +369,17 @@ class DailySpend(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-class MonthOpeningBalance(Base):
+class MonthOpeningBalance(Base, owned.OwnedMixin):
     """A manual override of what a month opens with. Without one, a month
     opens with the previous month's closing balance (see services/balance.py);
     an override replaces that - for when the logged expenses don't add up to
     the real account balance - and the later months roll forward from it."""
 
     __tablename__ = "month_opening_balances"
+    __table_args__ = (UniqueConstraint("owner_id", "month", name="uq_month_opening_balances_owner_id_month"),)
 
     id = Column(Integer, primary_key=True)
-    month = Column(String, nullable=False, unique=True)  # "YYYY-MM"
+    month = Column(String, nullable=False)  # "YYYY-MM"; one override per month per account
     amount_cents = Column(Integer, nullable=False)  # signed
     note = Column(String, nullable=True)
 
@@ -355,17 +387,19 @@ class MonthOpeningBalance(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class AppSetting(Base):
-    """Tiny key/value store for app-level settings (e.g. the month the
-    balance rollover chain starts)."""
+class AppSetting(Base, owned.OwnedMixin):
+    """Tiny key/value store for an account's settings (e.g. the month the
+    balance rollover chain starts). One value per key per account."""
 
     __tablename__ = "app_settings"
+    __table_args__ = (UniqueConstraint("owner_id", "key", name="uq_app_settings_owner_id_key"),)
 
-    key = Column(String, primary_key=True)
+    id = Column(Integer, primary_key=True)
+    key = Column(String, nullable=False)
     value = Column(String, nullable=False)
 
 
-class Scenario(Base):
+class Scenario(Base, owned.OwnedMixin):
     """A saved "what-if" - a named bundle of adjustments layered over the
     real recurring items at query time. Nothing here ever mutates a
     RecurringItem or Transaction row.
@@ -388,7 +422,7 @@ class Scenario(Base):
     )
 
 
-class ScenarioAdjustment(Base):
+class ScenarioAdjustment(Base, owned.OwnedMixin):
     """One tweak within a Scenario. `kind` picks which columns matter:
 
     - "add":    name, amount_cents, direction, frequency, anchor_month,

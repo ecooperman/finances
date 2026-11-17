@@ -1,6 +1,7 @@
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from shared_python import accounts_gate
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
@@ -13,6 +14,12 @@ from ..services.planned import planned_summary
 from ..services.trips import trip_forecasts
 
 router = APIRouter(prefix="/api", tags=["scenarios"])
+
+
+def _only_an_administrator_may_plan_lists_and_trips(request: Request, adj) -> None:
+    """A planned list or trip is read from the ADMINISTRATOR's lists and trips apps, so nobody else may plan one."""
+    if getattr(adj, "add_kind", None) == "planned" and not accounts_gate.current_account(request).is_admin:
+        raise HTTPException(status_code=403, detail="Only an administrator can plan a list or a trip")
 
 
 def _with_planned(db: Session, scenario):
@@ -83,8 +90,9 @@ def delete_scenario(scenario_id: int, db: Session = Depends(get_db)):
 
 @router.post("/scenarios/{scenario_id}/adjustments", response_model=schemas.ScenarioAdjustment)
 def add_adjustment(
-    scenario_id: int, adj: schemas.ScenarioAdjustmentCreate, db: Session = Depends(get_db)
+    scenario_id: int, adj: schemas.ScenarioAdjustmentCreate, request: Request, db: Session = Depends(get_db)
 ):
+    _only_an_administrator_may_plan_lists_and_trips(request, adj)
     if crud.get_scenario(db, scenario_id) is None:
         raise HTTPException(status_code=404, detail="Scenario not found")
     return crud.add_adjustment(db, scenario_id, adj)
@@ -92,8 +100,9 @@ def add_adjustment(
 
 @router.patch("/adjustments/{adjustment_id}", response_model=schemas.ScenarioAdjustment)
 def update_adjustment(
-    adjustment_id: int, adj: schemas.ScenarioAdjustmentUpdate, db: Session = Depends(get_db)
+    adjustment_id: int, adj: schemas.ScenarioAdjustmentUpdate, request: Request, db: Session = Depends(get_db)
 ):
+    _only_an_administrator_may_plan_lists_and_trips(request, adj)
     updated = crud.update_adjustment(db, adjustment_id, adj)
     if updated is None:
         raise HTTPException(status_code=404, detail="Adjustment not found")

@@ -20,6 +20,30 @@ real budget without touching stored data.
 Pulling real transactions from bank + credit-card accounts is a planned
 follow-up - see [`SYNC.md`](SYNC.md).
 
+## Accounts and privacy
+
+Several people can use the app, and **everyone's finances are completely private to them**: people labels, categories,
+recurring items, transactions, funds, scenarios, carried-over payments, daily spending, opening balances, settings and
+the trip/list settlements. It signs in through the shared front door (the dashboard) and is default-deny: signing in is
+not enough, a person needs an account here. Only administrators (`ADMIN_EMAILS`) can create accounts, from the **Users**
+page (also remove, restore, or delete a removed person's data); an administrator's own account is made on their first
+sign-in, and they take over the data that existed before accounts (the migration parked it on a placeholder user). A new
+account starts with the usual categories (`app/seed.py`) and nothing else. An administrator can manage who has an account
+but cannot read anyone else's money through this app.
+
+How it is enforced, so a forgotten check in one route cannot leak: `shared_python.accounts_gate` wraps the whole app and
+runs every request inside the signed-in person's scope; `shared_python.owned` filters every database read and write to
+that person below the app's own code, and refuses a row that points at another person's row; and each route that is
+handed an id also checks it is the caller's (a clean 400/404). `tests/test_accounts.py` calls EVERY route as a second
+person against the first person's ids and fails if any shows or changes their data (a route added later must be listed
+there). Anything new that holds a person's data must inherit `owned.OwnedMixin` and must not use raw SQL (a test lints
+for it). Names and references that used to be unique across the table are unique per person now.
+
+**The trip forecast and linked lists are administrator-only.** They read the trips and lists apps with service tokens that
+see the *administrator's* trips and lists, so for anyone else they return nothing (`app/integrations.py`, checked inside
+the fetch itself, so the cache is never handed over either), the controls are hidden, and planning or settling one is a
+403. Giving other people their own trip and list links would need those apps to say whose data a token may read.
+
 ## Pages
 
 | Page | What it does |
@@ -174,8 +198,8 @@ the new database - no application code depends on SQLite specifics.
 ## Deploying
 
 Runs as a systemd service on the Digital Ocean droplet, reached through a
-Cloudflare Tunnel (no inbound ports opened on the droplet) and gated by
-Cloudflare Access - see `deploy/finances.service`.
+Cloudflare Tunnel (no inbound ports opened on the droplet) and gated by the
+shared dashboard sign-in (see "Accounts and privacy" above) - see `deploy/finances.service`.
 
 One-time setup on the droplet:
 

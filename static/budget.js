@@ -871,6 +871,10 @@ linkForm.addEventListener("submit", async (e) => {
   }
 });
 
+// Trips and linked lists come from the ADMINISTRATOR's trips and lists apps, so only an administrator is offered them
+// (the server returns nothing to anyone else anyway).
+let CAN_LINK = false;
+
 async function load() {
   const showRec = state.view === "all" || state.view === "recurring";
   const showOne = state.view === "all" || state.view === "onetime";
@@ -881,7 +885,8 @@ async function load() {
   allTimeBtn.classList.toggle("hidden", !showOne);
 
   try {
-    const jobs = [renderBaseline(), loadFunds(), loadTrips(), loadLinkedLists()];
+    const jobs = [renderBaseline(), loadFunds()];
+    if (CAN_LINK) jobs.push(loadTrips(), loadLinkedLists());
     if (showRec) jobs.push(loadRecurring());
     if (showOne) jobs.push(loadOnetime());
     await Promise.all(jobs);
@@ -899,6 +904,10 @@ function setView(view) {
 }
 
 async function init() {
+  const me = await Global.currentUser();
+  CAN_LINK = !!(me && me.can_use && me.can_use.trips);
+  document.getElementById("sec-trips").classList.toggle("hidden", !CAN_LINK);
+  document.getElementById("sec-linked-lists").classList.toggle("hidden", !CAN_LINK);
   [PEOPLE, CATEGORIES, FUNDS] = await Promise.all([
     loadPeople(),
     loadCategories(),

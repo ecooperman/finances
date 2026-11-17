@@ -12,16 +12,21 @@ PORT = 8080
 ENV = os.environ.get("APP_ENV", "local")
 SHARED_ASSETS_BASE = "https://static.evancooperman.com" if ENV == "production" else "http://127.0.0.1:8070"
 
-# Who is signed in (shared_python): the whole app is private to its administrators, so everyone else is refused
-# (see app/access.py). ADMIN_EMAILS (comma-separated) comes from the shared secrets file on the droplet; locally
-# the dev user is one, and is who every request is treated as.
+# Where this app lives, for the links in the emails that tell people they have been let in.
+PUBLIC_URL = "https://finances.evancooperman.com" if ENV == "production" else f"http://{HOST}:{PORT}"
+
+# Who is signed in (shared_python): only people with an account get in, each into their own completely private
+# finances (see app/access.py). ADMIN_EMAILS (comma-separated) comes from the shared secrets file on the droplet: they
+# always have an account (made on first sign-in) and are the only ones who can let other people in, or use what reads
+# the administrator's own trips and lists below. Locally the dev user is one, and is who every request is treated as.
 DEV_USER_EMAIL = os.environ.get("DEV_USER_EMAIL", "dev@localhost.test").strip().lower()
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
 if ENV != "production":
     ADMIN_EMAILS.add(DEV_USER_EMAIL)
 
 # The trip-planning app's base URL, for the trip cost forecast (see
-# app/services/trips.py). Same value local and in production: both talk to
+# app/services/trips.py). ADMINISTRATORS ONLY: the service token below reads the administrator's trips, so it is never
+# used for anyone else (app/integrations.py). Same value local and in production: both talk to
 # the trip-planning process directly on 127.0.0.1:8060, which sidesteps
 # Cloudflare Access entirely. Only override if trip-planning moves.
 TRIPS_API_BASE = os.environ.get("TRIPS_API_BASE", "http://127.0.0.1:8060")
@@ -33,7 +38,7 @@ TRIPS_API_BASE = os.environ.get("TRIPS_API_BASE", "http://127.0.0.1:8060")
 # is simply not sent and trip-planning refuses the call.
 TRIPS_SERVICE_TOKEN = os.environ.get("TRIPS_SERVICE_TOKEN")
 
-# The lists app's base URL, for linked lists (see app/services/linked_lists.py): a list that tracks
+# The lists app's base URL, for linked lists (see app/services/linked_lists.py; administrators only, like trips): a list that tracks
 # costs can be linked into the budget as one lump sum, read live. Like trip-planning, called directly
 # on 127.0.0.1 with a shared secret sent as X-Service-Token - the same value as lists'
 # LISTS_SERVICE_TOKEN, set once in /etc/personal-apps/shared.env (see DEPLOYMENT.md). Unset, the header

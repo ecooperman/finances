@@ -25,7 +25,7 @@ START_KEY = "rollover_start_month"
 
 def rollover_start(db: Session) -> str:
     """The configured start month, created (as the current month) if unset."""
-    row = db.get(models.AppSetting, START_KEY)
+    row = db.query(models.AppSetting).filter(models.AppSetting.key == START_KEY).first()
     if row is None:
         row = models.AppSetting(key=START_KEY, value=date.today().strftime("%Y-%m"))
         db.add(row)

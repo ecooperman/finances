@@ -17,6 +17,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from .. import models
+from .. import integrations
 from ..config import LISTS_API_BASE, LISTS_SERVICE_TOKEN
 from .forecast import place
 from .funds import current_month
@@ -28,6 +29,14 @@ _cache = {"at": 0.0, "data": None}
 
 
 def fetch_list_costs() -> Optional[List[dict]]:
+    """The lists to forecast: [] for anyone but an administrator. The service token reads the ADMINISTRATOR's lists, so
+    for another person (or outside a request) it is never even sent, and what the cache holds is never handed over."""
+    if not integrations.allowed():
+        return []
+    return _fetch_list_costs()
+
+
+def _fetch_list_costs() -> Optional[List[dict]]:
     """`GET {LISTS_API_BASE}/api/lists/cost-summary`, cached for 30s. Returns None (never raises) if the
     lists app is unreachable or refuses the call - which is different from an empty list, so a linked
     list is shown as "not found" rather than quietly dropped from the forecast."""

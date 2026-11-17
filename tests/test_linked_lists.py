@@ -13,6 +13,7 @@ from app.deps import get_db
 from app.main import app
 from app.services import linked_lists as svc
 from app.services import trips as trips_service
+from app.services.trips import fetch_trip_costs as REAL_FETCH_TRIPS  # the autouse fixtures replace the module's own
 from app.services.monthly import compute_month
 
 
@@ -353,11 +354,11 @@ def test_a_scenario_with_no_planned_lines_has_an_empty_summary(client, db):
 # --- trips: say so when trip-planning cannot be read ----------------------------------------
 
 
-def test_trips_report_unreachable_when_trip_planning_cannot_be_read(db, monkeypatch):
+def test_trips_report_unreachable_when_trip_planning_cannot_be_read(db, monkeypatch, as_administrator):
     def refuse(*args, **kwargs):
         raise OSError("connection refused")
 
-    monkeypatch.undo()  # the autouse fixtures stub the fetch; this test exercises the real one
+    monkeypatch.setattr(trips_service, "fetch_trip_costs", REAL_FETCH_TRIPS)  # the autouse fixtures stub the fetch; this test exercises the real one
     trips_service._cache.update(at=0.0, data=None, ok=True)
     monkeypatch.setattr(trips_service.httpx, "get", refuse)
     fc = trips_service.trip_forecasts(db, "2026-09")
@@ -365,7 +366,7 @@ def test_trips_report_unreachable_when_trip_planning_cannot_be_read(db, monkeypa
     assert trips_service.trips_summary(db, "2026-09")["reachable"] is False
 
 
-def test_trips_are_reachable_again_once_a_call_works(db, monkeypatch):
+def test_trips_are_reachable_again_once_a_call_works(db, monkeypatch, as_administrator):
     class Reply:
         def raise_for_status(self):
             pass
@@ -373,14 +374,14 @@ def test_trips_are_reachable_again_once_a_call_works(db, monkeypatch):
         def json(self):
             return []
 
-    monkeypatch.undo()
+    monkeypatch.setattr(trips_service, "fetch_trip_costs", REAL_FETCH_TRIPS)
     trips_service._cache.update(at=0.0, data=None, ok=False)
     monkeypatch.setattr(trips_service.httpx, "get", lambda *a, **k: Reply())
     assert trips_service.trip_forecasts(db, "2026-09")["reachable"] is True
 
 
 def test_the_trips_api_carries_the_flag(client, monkeypatch):
-    monkeypatch.undo()
+    monkeypatch.setattr(trips_service, "fetch_trip_costs", REAL_FETCH_TRIPS)
     trips_service._cache.update(at=0.0, data=None, ok=True)
 
     def refuse(*args, **kwargs):

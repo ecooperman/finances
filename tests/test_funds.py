@@ -12,15 +12,6 @@ from app.services.funds import fund_status, funds_summary, months_elapsed
 from app.services.monthly import compute_month
 
 
-@pytest.fixture()
-def db():
-    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
-    yield session
-    session.close()
-
-
 def _fund(db, **kw):
     kw.setdefault("name", "Vet")
     kw.setdefault("annual_amount_cents", 120_000)  # $1,200/yr -> $100/mo

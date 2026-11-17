@@ -1,6 +1,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from shared_python import accounts_gate
 from sqlalchemy.orm import Session
 
 from .. import crud, models, schemas
@@ -9,6 +10,9 @@ from ..services.funds import current_month
 from ..services.trips import fetch_trip_costs, trip_forecasts, trips_summary
 
 router = APIRouter(prefix="/api/trips", tags=["trips"])
+# Trips come from the ADMINISTRATOR's trips app (a service token that sees only theirs), so anyone else gets an empty
+# forecast to read and may change nothing here.
+ADMIN_ONLY = [Depends(accounts_gate.require_admin)]
 
 
 def _travel_category_id(db: Session):
@@ -37,7 +41,7 @@ def summary(
     return trips_summary(db, month or current_month())
 
 
-@router.patch("/{trip_id}")
+@router.patch("/{trip_id}", dependencies=ADMIN_ONLY)
 def update_trip_settlement(
     trip_id: int, updates: schemas.TripSettlementUpdate, db: Session = Depends(get_db)
 ):
@@ -50,7 +54,7 @@ def update_trip_settlement(
     }
 
 
-@router.post("/{trip_id}/settle")
+@router.post("/{trip_id}/settle", dependencies=ADMIN_ONLY)
 def settle_trip(trip_id: int, body: schemas.SettleTripRequest, db: Session = Depends(get_db)):
     trip = next((t for t in fetch_trip_costs() if t["id"] == trip_id), None)
     if trip is None:
@@ -73,7 +77,7 @@ def settle_trip(trip_id: int, body: schemas.SettleTripRequest, db: Session = Dep
     }
 
 
-@router.post("/{trip_id}/unsettle")
+@router.post("/{trip_id}/unsettle", dependencies=ADMIN_ONLY)
 def unsettle_trip(trip_id: int, db: Session = Depends(get_db)):
     s = crud.unsettle_trip(db, trip_id)
     if s is None:

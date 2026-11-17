@@ -16,6 +16,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from .. import models
+from .. import integrations
 from ..config import TRIPS_API_BASE, TRIPS_SERVICE_TOKEN
 from .forecast import place
 from .funds import current_month
@@ -27,6 +28,14 @@ _cache = {"at": 0.0, "data": None, "ok": True}
 
 
 def fetch_trip_costs() -> List[dict]:
+    """The trips to forecast: [] for anyone but an administrator. The service token reads the ADMINISTRATOR's trips, so
+    for another person (or outside a request) it is never even sent, and what the cache holds is never handed over."""
+    if not integrations.allowed():
+        return []
+    return _fetch_trip_costs()
+
+
+def _fetch_trip_costs() -> List[dict]:
     """`GET {TRIPS_API_BASE}/api/trips/cost-summary`, cached for 30s.
     Returns [] (never raises) if trip-planning is unreachable or errors -
     the forecast then has no trips, and `trips_reachable()` says why, so the

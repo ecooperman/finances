@@ -3,6 +3,7 @@ services/linked_lists.py). The list id is the key everywhere, like the trip id f
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from shared_python import accounts_gate
 from sqlalchemy.orm import Session
 
 from .. import crud, schemas
@@ -12,6 +13,9 @@ from ..services import linked_lists as lists_service
 from ..services.linked_lists import list_forecasts, lists_summary
 
 router = APIRouter(prefix="/api/linked-lists", tags=["linked-lists"])
+# Lists come from the ADMINISTRATOR's lists app (a service token that sees only theirs), so anyone else gets nothing to
+# read and may change nothing here.
+ADMIN_ONLY = [Depends(accounts_gate.require_admin)]
 
 
 def _state(link):
@@ -37,7 +41,7 @@ def summary(month: Optional[str] = Query(None, description="YYYY-MM; default now
     return lists_summary(db, month or current_month())
 
 
-@router.post("")
+@router.post("", dependencies=ADMIN_ONLY)
 def link_list(body: schemas.LinkedListCreate, db: Session = Depends(get_db)):
     costs = lists_service.fetch_list_costs()
     if costs is None:
@@ -48,7 +52,7 @@ def link_list(body: schemas.LinkedListCreate, db: Session = Depends(get_db)):
     return _state(crud.link_list(db, body.list_id, found["name"], body.due_date))
 
 
-@router.patch("/{list_id}")
+@router.patch("/{list_id}", dependencies=ADMIN_ONLY)
 def update_link(list_id: int, updates: schemas.LinkedListUpdate, db: Session = Depends(get_db)):
     link = crud.update_linked_list(db, list_id, updates)
     if link is None:
@@ -56,14 +60,14 @@ def update_link(list_id: int, updates: schemas.LinkedListUpdate, db: Session = D
     return _state(link)
 
 
-@router.delete("/{list_id}")
+@router.delete("/{list_id}", dependencies=ADMIN_ONLY)
 def unlink(list_id: int, db: Session = Depends(get_db)):
     if not crud.unlink_list(db, list_id):
         raise HTTPException(status_code=404, detail="That list is not linked")
     return {"ok": True}
 
 
-@router.post("/{list_id}/settle")
+@router.post("/{list_id}/settle", dependencies=ADMIN_ONLY)
 def settle(list_id: int, body: schemas.SettleTripRequest, db: Session = Depends(get_db)):
     link = crud.get_linked_list(db, list_id)
     if link is None:
@@ -84,7 +88,7 @@ def settle(list_id: int, body: schemas.SettleTripRequest, db: Session = Depends(
     }
 
 
-@router.post("/{list_id}/unsettle")
+@router.post("/{list_id}/unsettle", dependencies=ADMIN_ONLY)
 def unsettle(list_id: int, db: Session = Depends(get_db)):
     link = crud.unsettle_linked_list(db, list_id)
     if link is None:

@@ -1,14 +1,14 @@
 import subprocess
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
-from shared_python import auth, oidc_login
+from shared_python import accounts_gate, oidc_login, owned
 
-from . import access, config
+from . import access, config, crud, schemas
 from .config import SHARED_ASSETS_BASE
 from .routers import (
     balance,
@@ -24,11 +24,13 @@ from .routers import (
     scenarios,
     transactions,
     trips,
+    users,
 )
 
 # Schema is owned by Alembic migrations (see migrations/) - run
 # `alembic upgrade head` before starting the app rather than relying on
-# create_all, so schema changes never silently bypass migrations.
+# create_all, so schema changes never silently bypass migrations. (A new
+# account's default categories are made when the account is, see crud.py.)
 
 
 def _get_git_sha() -> str:
@@ -50,7 +52,7 @@ def _get_git_sha() -> str:
 GIT_SHA = _get_git_sha()
 
 app = FastAPI(title="Finances")
-access.install(app)  # the whole app is private to its administrators
+access.install(app)  # only people with an account get in, each inside their own private finances (app/access.py)
 templates = Jinja2Templates(directory="templates")
 
 
@@ -59,12 +61,29 @@ def get_version():
     return {"version": GIT_SHA}
 
 
-@app.get("/api/me")
-def get_me(request: Request):
-    """Who is signed in, for the page header's email and Log out (the shared Global.mountUserBadge reads this). The
-    whole app is already private to its administrators (app/access.py), so whoever gets here is one."""
-    email = auth.request_email(request, config.DEV_USER_EMAIL).strip().lower()
-    return {"email": email, "is_admin": True, "logout_url": oidc_login.logout_url(request)}
+@app.exception_handler(crud.BadReference)
+def _bad_reference(request: Request, exc: crud.BadReference):
+    return JSONResponse({"detail": str(exc)}, status_code=400, headers={"Cache-Control": "no-store"})
+
+
+@app.exception_handler(owned.WrongOwner)
+def _wrong_owner(request: Request, exc: owned.WrongOwner):
+    """The data layer's last line of defence refused a write that touched someone else's data."""
+    return JSONResponse({"detail": "That isn't yours to change"}, status_code=403, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/me", response_model=schemas.Me)
+def get_me(request: Request, account=Depends(accounts_gate.current_account)):
+    """Who is signed in, for the page header's email and Log out (the shared Global.mountUserBadge reads this), and for
+    hiding what only an administrator may use: the trip forecast and linked lists read the administrator's own trips and
+    lists apps, so they are theirs alone."""
+    return schemas.Me(
+        id=account.id,
+        email=account.email,
+        is_admin=account.is_admin,
+        can_use={"trips": account.is_admin, "lists": account.is_admin},
+        logout_url=oidc_login.logout_url(request),
+    )
 
 
 # Each HTML page is a Jinja2 template rendered by an explicit route (not
@@ -85,12 +104,13 @@ app.get("/", response_class=HTMLResponse)(_render("index.html"))
 app.get("/budget.html", response_class=HTMLResponse)(_render("budget.html"))
 app.get("/scenarios.html", response_class=HTMLResponse)(_render("scenarios.html"))
 app.get("/settings.html", response_class=HTMLResponse)(_render("settings.html"))
+app.get("/users.html", response_class=HTMLResponse)(_render("users.html"))
 
 
 @app.middleware("http")
 async def no_cache(request: Request, call_next):
     """Never let the browser (or iOS's aggressive standalone-PWA cache) serve
-    a stale copy of the app - these are single-user local tools, not public
+    a stale copy of the app - these are private tools, not public
     sites, so there's no real cost to always fetching fresh. `no-store` (not
     `no-cache`) is deliberate: `no-cache` still permits caching as long as
     the cache revalidates first, which a CDN or PWA cache layer isn't
@@ -117,6 +137,7 @@ app.include_router(paycheck.router)
 app.include_router(deferrals.router)
 app.include_router(daily.router)
 app.include_router(balance.router)
+app.include_router(users.router)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
