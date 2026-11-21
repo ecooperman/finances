@@ -350,6 +350,7 @@ SPEC = {
     ("POST", "/api/linked-lists/{list_id}/settle"): ("admin", lambda a: {"json": {"date": "2026-11-12", "amount_cents": 100}}),
     ("POST", "/api/linked-lists/{list_id}/unsettle"): ("admin", lambda a: {}),
     ("GET", "/api/users"): ("admin", lambda a: {}),
+    ("GET", "/api/admin/stats"): ("admin", lambda a: {}),
     ("GET", "/api/users/suggestions"): ("admin", lambda a: {}),
     ("POST", "/api/users"): ("admin", lambda a: {"json": {"email": "friend@example.com"}}),
     ("PATCH", "/api/users/{user_id}"): ("admin", lambda a: {"json": {"status": "removed"}}),

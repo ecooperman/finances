@@ -57,6 +57,12 @@ def db(world):
 
 
 @pytest.fixture(autouse=True)
+def forget_last_seen():
+    """Who was recorded as last seen is remembered in memory for an hour; every test has a database of its own but ids repeat."""
+    access.seen.reset()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_trip_fetch(monkeypatch):
     """Isolate the suite from the trip-planning app: by default no trips.
     Use the `set_trips` fixture (tests/test_trips.py) to supply data.

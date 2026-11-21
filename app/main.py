@@ -22,6 +22,7 @@ from .routers import (
     people,
     recurring,
     scenarios,
+    stats,
     transactions,
     trips,
     users,
@@ -138,6 +139,7 @@ app.include_router(deferrals.router)
 app.include_router(daily.router)
 app.include_router(balance.router)
 app.include_router(users.router)
+app.include_router(stats.router)
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

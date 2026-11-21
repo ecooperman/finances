@@ -17,11 +17,15 @@ Nothing calls this app (it calls trips and lists, on this machine, with their se
 machine-to-machine exception and nothing is public: no manifest, no icons, no service worker."""
 from typing import Union
 
-from shared_python import accounts_gate
+from shared_python import accounts_gate, usage
 from shared_python.accounts_gate import Account
 
 from . import config, crud, integrations, models
 from .database import SessionLocal
+
+# When each person was last here, for the dashboard's stats pages. The session factory is looked up at call time (not captured here) so a test that
+# swaps in its own database swaps this too, and a test can never write to the real one.
+seen = usage.LastSeen(lambda: SessionLocal())
 
 def account_for(email: str) -> Union[Account, str]:
     """This person's account in the app: administrators always have one (made on first sign-in), anyone else only
@@ -49,4 +53,4 @@ def install(app) -> None:
         finally:
             integrations.reset(token)
 
-    accounts_gate.install(app, account_for=account_for, dev_user_email=config.DEV_USER_EMAIL)
+    accounts_gate.install(app, account_for=account_for, dev_user_email=config.DEV_USER_EMAIL, seen=seen)
